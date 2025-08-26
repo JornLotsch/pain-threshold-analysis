@@ -1,0 +1,14 @@
+OLD
+.idea
+*.Rproj
+.Rproj.user
+.Rhistory
+*.RData
+*.png
+*.html
+*.txt
+*.code-workspace
+*.csv
+*.svg
+*.png
+
