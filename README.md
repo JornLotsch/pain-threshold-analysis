@@ -11,7 +11,7 @@ This repository contains R scripts for analyzing pain threshold data across diff
 - `Pheno_125_correlation.R` - Correlation analysis and heatmap visualization of pain threshold variables grouped by stimulus type
 - `Pheno_125_VIF.R` - Variance Inflation Factor analysis to identify collinearity and aliasing issues in logistic regression models
 - `Pheno_125_RF_LR_kNN.R` - Machine learning classification using Random Forest, Logistic Regression, and k-Nearest Neighbors with feature selection via Boruta and LASSO
-- `FCPS_experiments.R` - Additional experimental analysis
+- `FCPS_experiments.R` - Additional experimental analysis on a data set where regression fails
 
 ## Data
 
