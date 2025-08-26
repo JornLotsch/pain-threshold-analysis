@@ -1105,7 +1105,7 @@ for (use_curated in use_curated) {
     geom_hline(yintercept = c(-0.5, 0.5), linetype = "dashed", color = "grey60") +
     geom_hline(yintercept = c(-0.8, 0.8), linetype = "dashed", color = "grey50") +
     scale_fill_manual(
-      values = c("Original dataset" = "#9ecae1", "Training dataset" = "#fdae6b"),
+      values = c("Original dataset" = "dodgerblue", "Training dataset" = "chartreuse3"),
       name = NULL
     ) +
     coord_flip() +
