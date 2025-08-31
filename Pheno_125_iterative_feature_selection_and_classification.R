@@ -8,9 +8,10 @@
 
 # --- Libraries ----------------------------------------------------------------
 library(parallel)
-library(opdisDownsampling)
 library(randomForest)
 library(caret)
+library(C50)
+library(partykit)
 library(pbmcapply)
 library(Boruta)
 library(reshape2)
@@ -20,34 +21,45 @@ library(glmnet)
 library(car)
 library(tidyr)
 library(ggplot2)
-library(patchwork)   # for plot layout composition
+library(patchwork)
 
 ###############################################################################
-# Configuration Parameters (Modify these for your dataset)
+# Configuration Parameters
 ###############################################################################
 
-# External functions file path
+# External functions
 FUNCTIONS_FILE_PATH <- "/home/joern/.Datenplatte/Joerns Dateien/Aktuell/ABCPython/08AnalyseProgramme/R/ABC2way/feature_selection_and_classification_functions.R"
 
-# File paths - 
-DATA_FILE_PATH <- "/home/joern/Dokumente/PainGenesDrugs/08AnalyseProgramme/R/PainThresholdsData_transformed_imputed.csv"
-TARGET_FILE_PATH <- "/home/joern/Dokumente/PainGenesDrugs/08AnalyseProgramme/R/PainThresholds.csv"
+# Dataset name
+DATASET_NAME <- "Pheno_125"
+EXPERIMENTS_DIR <- "/home/joern/.Datenplatte/Joerns Dateien/Aktuell/ABCPython/08AnalyseProgramme/R/ABC2way/"
+
+# Dataset paths (now only training + validation CSVs)
+base_path <- "/home/joern/Dokumente/PainGenesDrugs"
+r_path    <- "08AnalyseProgramme/R"
+
+train_file <- file.path(base_path, r_path, "PainThresholds_scaled_Training.csv")
+val_file   <- file.path(base_path, r_path, "PainThresholds_scaled_Test.csv")
 
 # Analysis parameters
 SEED <- 42
-noise_factor <- 0.05
+noise_factor <- 0.2
 CORRELATION_METHOD <- "pearson"
 CORRELATION_LIMIT <- 0.9
 Boruta_tentative_in <- FALSE
 use_nyt <- TRUE
 tune_RF <- TRUE
+mtry_12only <- TRUE
+
 use_curated <- FALSE
 use_roc_auc <- FALSE
 training_and_validation_subsplits <- TRUE
 TRAINING_PARTITION_SIZE <- 0.8
 VALIDATION_PARTITION_SIZE <- 0.8
 
-# Dataset-specific configuration - 
+RUN_ONE_ADDITIONAL_ITERATION <- FALSE
+
+# Dataset-specific configuration  
 DATASET_COLUMN_NAMES <- c(
   "Heat", "Pressure", "Current", "Heat_Capsaicin",
   "Capsaicin_Effect_Heat", "Cold", "Cold_Menthol", "Menthol_Effect_Cold",
@@ -60,202 +72,100 @@ CURATED_COLUMN_NAMES <- c(
   "vonFrey", "vonFrey_Capsaicin"
 )
 
-COLUMNS_COLINEAR <- NULL  # Will be determined 
+COLUMNS_COLINEAR <- NULL  # Will be determined later
 
 # Noise addition parameters
-ADD_NOISE_COLUMN <- TRUE
+ADD_NOISE_COLUMN   <- TRUE
 NOISE_COLUMN_SOURCE <- "Pressure"
-NOISE_COLUMN_NAME <- "Pressure2"
+NOISE_COLUMN_NAME   <- "Pressure2"
 
 ###############################################################################
 # Load External Functions
 ###############################################################################
-
 if (file.exists(FUNCTIONS_FILE_PATH)) {
   source(FUNCTIONS_FILE_PATH)
 } else {
   stop(paste("Functions file not found:", FUNCTIONS_FILE_PATH))
 }
 
-###############################################################################
-# Main Execution
-###############################################################################
+set_working_directory(EXPERIMENTS_DIR)
 
-# Check existence of data files
-if (!file.exists(DATA_FILE_PATH)) {
-  stop(paste("Data file not found:", DATA_FILE_PATH))
+###############################################################################
+# Check data files existence
+###############################################################################
+if (!file.exists(train_file)) {
+  stop(paste("Training data file not found:", train_file))
 }
-if (!file.exists(TARGET_FILE_PATH)) {
-  stop(paste("Target file not found:", TARGET_FILE_PATH))
+if (!file.exists(val_file)) {
+  stop(paste("Validation data file not found:", val_file))
 }
 
+
 ###############################################################################
-# Train/Validation Split
+# Load data and modify files when needed
 ###############################################################################
 
-# Load data using external functions
-pain_data <- load_pain_thresholds_data(DATA_FILE_PATH)
+# --- Define paths ---
+base_path <- "/home/joern/Dokumente/PainGenesDrugs"
+r_path    <- "08AnalyseProgramme/R"
+
+train_file <- file.path(base_path, r_path, "PainThresholds_scaled_Training.csv")
+val_file   <- file.path(base_path, r_path, "PainThresholds_scaled_Test.csv")
+
+# --- Load datasets ---
+train_df <- read.csv(train_file, row.names = 1)
+val_df   <- read.csv(val_file, row.names = 1)
+
+# --- Sizes to later reseparate ---
+n_train <- nrow(train_df)
+n_val   <- nrow(val_df)
+
+# --- Extract features + targets ---
+train_features <- train_df[, -ncol(train_df)]
+train_target   <- train_df[,  ncol(train_df)]
+
+val_features   <- val_df[, -ncol(val_df)]
+val_target     <- val_df[,  ncol(val_df)]
+
+# --- Combine into pain_data + target_data ---
+pain_data   <- rbind(train_features, val_features)
+target_data <- c(train_target, val_target)
+
+# --- Rename columns once, for the combined dataset ---
 pain_data <- rename_pain_data_columns(pain_data, DATASET_COLUMN_NAMES)
-target_data <- load_target_data(TARGET_FILE_PATH)
 
-# Duplicate pressure variable with small noise addition
+# --- Add noise ONCE (so all subsets share the same noise values) ---
 set.seed(SEED)
-pain_data$Pressure2 <- pain_data$Pressure +
-  runif(length(pain_data$Pressure),
-        min = -abs(pain_data$Pressure) * noise_factor,
-        max = abs(pain_data$Pressure) * noise_factor)
+pain_data[[NOISE_COLUMN_NAME]] <- pain_data[[NOISE_COLUMN_SOURCE]] +
+  rnorm(
+    n    = nrow(pain_data),
+    mean = 0,
+    sd   = abs(pain_data[[NOISE_COLUMN_SOURCE]]) * noise_factor
+  )
 
-# Use only curated variables if specified
-if (use_curated) pain_data <- pain_data[, CURATED_COLUMN_NAMES]
+# --- Reseparate into train/validation, consistent with original splits ---
+training_data_original   <- pain_data[1:n_train, ]
+validation_data_original <- pain_data[(n_train + 1):(n_train + n_val), ]
 
-# Split into training and validation using opdisDownsampling package
-data_split <- opdisDownsampling::opdisDownsampling(
-  pain_data,
-  Cls = target_data,
-  Size = 0.8,
-  Seed = SEED,
-  nTrials = 2000000,
-  MaxCores = parallel::detectCores() - 1
-)
+training_target   <- target_data[1:n_train]
+validation_target <- target_data[(n_train + 1):(n_train + n_val)]
 
-training_data_original <- data_split$ReducedData[, 1:(ncol(data_split$ReducedData) - 1)]
-training_target <- data_split$ReducedData$Cls
+# --- Optional curation after renaming + noise ---
+if (use_curated) {
+  training_data_original   <- training_data_original[, CURATED_COLUMN_NAMES]
+  validation_data_original <- validation_data_original[, CURATED_COLUMN_NAMES]
+  pain_data                <- pain_data[, CURATED_COLUMN_NAMES]
+}
 
-validation_data_original <- data_split$RemovedData[, 1:(ncol(data_split$RemovedData) - 1)]
-validation_target <- data_split$RemovedData$Cls
+# Save data file for use in other analyses
+Pheno_125_prepared_data <- cbind.data.frame(Target = target_data, pain_data)
+write.csv(Pheno_125_prepared_data, "Pheno_125_prepared_data.csv")
 
 ###############################################################################
 # Run analysis sequentially
 ###############################################################################
-# Run full dataset analysis first
-full_config <- list(
-  name = "Full dataset",
-  use_curated = FALSE,
-  curated_names = NULL
-)
 
-full_results <- run_analysis_pipeline(
-  training_data_actual = training_data_original,
-  training_target = training_target,
-  validation_data_actual = validation_data_original,
-  validation_target = validation_target,
-  use_curated_subset = FALSE,
-  curated_names = NULL,
-  add_file_string = "_full"
-)
-
-# Initialize storage for all results
-all_results_feature_selection <- list()
-all_results_feature_selection[["Full dataset"]] <- full_results
-print(all_results_feature_selection[[1]]$plots$matrix)
-
-# Initialize curated features based on full results
-boruta_res <- get_boruta_features(full_results$boruta_results$finalDecision, Boruta_tentative_in)
-boruta_selected <- boruta_res$selected
-lasso_selected <- full_results$lasso_results$selected
-available_features <- names(training_data_original)
-curated_features <- setdiff(available_features, union(boruta_selected, lasso_selected))
-
-# Set max iterations and initialize counter
-max_iterations <- 5
-iteration <- 0
-
-# Force start loop condition
-classification_success_values <- c(1)
-
-# Initialize list to hold each curated iteration's results separately
-all_curated_results <- list()
-
-while (length(curated_features) > 0 && any(classification_success_values != 0) && iteration < max_iterations) {
-  iteration <- iteration + 1
-  cat(sprintf("Iteration %d: running curated subset with %d features\n", iteration, length(curated_features)))
-  
-  curated_results <- run_analysis_pipeline(
-    training_data_actual = training_data_original,
-    training_target = training_target,
-    validation_data_actual = validation_data_original,
-    validation_target = validation_target,
-    use_curated_subset = TRUE,
-    curated_names = curated_features,
-    add_file_string = paste0("_curated_iter", iteration)
-  )
-  
-  # Save this iteration's results indexed by iteration
-  all_curated_results[[paste0("Iter_", iteration)]] <- curated_results
-  print(curated_results$plots$matrix)
-  
-  results_table <- curated_results$results_table
-  
-  # Identify rows with "rejected" in Dataset name (case insensitive)
-  rejected_indices <- grepl("rejected", results_table$Dataset, ignore.case = TRUE)
-  
-  # Only continue if any rejected dataset has Classification_Success == 1
-  continue_iteration <- any(results_table$Classification_Success[rejected_indices] == 1)
-  
-  if (continue_iteration) {
-    # Remove selected features
-    boruta_res <- get_boruta_features(curated_results$boruta_results$finalDecision, Boruta_tentative_in)
-    boruta_selected <- boruta_res$selected
-    lasso_selected <- curated_results$lasso_results$selected
-    curated_features <- setdiff(curated_features, union(boruta_selected, lasso_selected))
-    classification_success_values <- results_table$Classification_Success
-  } else {
-    cat("No rejected datasets with Classification_Success == 1, stopping iteration.\n")
-    # Set to all zero to break while loop
-    classification_success_values <- rep(0, length(results_table$Classification_Success))
-  }
-}
-
-# # Run last iteration manually after the loop if desired
-# boruta_res <- get_boruta_features(curated_results$boruta_results$finalDecision, Boruta_tentative_in)
-# boruta_selected <- boruta_res$selected
-# lasso_selected <- curated_results$lasso_results$selected
-# curated_features <- setdiff(curated_features, union(boruta_selected, lasso_selected))
-# 
-# if (!(length(curated_features) > 0 && any(classification_success_values != 0) && iteration < max_iterations)) {
-#   iteration <- iteration + 1
-#   cat(sprintf("Final iteration %d: running curated subset with %d features\n", iteration, length(curated_features)))
-#   curated_results <- run_analysis_pipeline(
-#     training_data_actual = training_data_original,
-#     training_target = training_target,
-#     validation_data_actual = validation_data_original,
-#     validation_target = validation_target,
-#     use_curated_subset = TRUE,
-#     curated_names = curated_features,
-#     add_file_string = paste0("_curated_iter", iteration + 1)
-#   )
-#   all_curated_results[[paste0("Iter_", iteration)]] <- curated_results
-#   print(curated_results$plots$matrix)
-# }
-
-# Store all curated iteration results in main results list
-all_results_feature_selection[["Curated subset iterations"]] <- all_curated_results
-
-if (iteration == max_iterations && any(classification_success_values != 0)) {
-  cat("Max iterations reached but classification success is still 1 for some datasets.\n")
-}
-
-# Extract full results table and add a column to identify the iteration
-full_results_table <- all_results_feature_selection[["Full dataset"]]$results_table
-full_results_table$Iteration <- "Full dataset"
-
-# Initialize combined table starting with full dataset results
-combined_results_table <- full_results_table
-
-# Append all curated iteration results tables with iteration names
-for(iter_name in names(all_results_feature_selection[["Curated subset iterations"]])) {
-  iter_table <- all_results_feature_selection[["Curated subset iterations"]][[iter_name]]$results_table
-  iter_table$Iteration <- iter_name
-  combined_results_table <- rbind(combined_results_table, iter_table)
-}
-
-# Save final results tables to disk
-write.csv(combined_results_table,
-          paste0("ML_results_df_table.csv"))
-
-cat("\n=== ANALYSIS COMPLETE ===\n")
-cat("All results stored in 'all_results_feature_selection' list\n")
-cat("Each curated iteration available in all_results_feature_selection$`Curated subset iterations`$Iter_X\n")
+results_list <- run_feature_selection_iterations()
 
 
 ###############################################################################
@@ -290,8 +200,8 @@ combine_and_save_plots <- function(results_list, iteration = "Full dataset", add
   
   # Compose filenames
   suffix <- if (iteration == "Full dataset") "" else paste0("_", iteration)
-  png_file <- paste0("feature_selection_comparison", suffix, add_file_string, ".png")
-  svg_file <- paste0("feature_selection_comparison", suffix, add_file_string, ".svg")
+  png_file <- paste0(DATASET_NAME, "_feature_selection_comparison", suffix, add_file_string, ".png")
+  svg_file <- paste0(DATASET_NAME, "_feature_selection_comparison", suffix, add_file_string, ".svg")
   
   # Save to files
   ggsave(png_file, plot = combined_plot, width = 14, height = 8, dpi = 300)
@@ -300,7 +210,6 @@ combine_and_save_plots <- function(results_list, iteration = "Full dataset", add
   invisible(combined_plot)
 }
 
-# Example usage:
 # For full dataset
 combine_and_save_plots(all_results_feature_selection, "Full dataset")
 
@@ -334,7 +243,7 @@ for (name in names(datasets_to_test)) {
 
 # Run logistic regression variants on original data
 for (i in 1:2) {
-  if (i == 2) sink(paste0("lr_orig_output", ".txt"))
+  if (i == 2) sink(paste0(DATASET_NAME, "_lr_orig_output", ".txt"))
   
   r1 <- run_single_logistic_regression(
     train_data = pain_data,
@@ -371,7 +280,7 @@ for (i in 1:2) {
   )
   
   run_single_logistic_regression(
-    train_data = pain_data[, names(pain_data) %in% c(COLUMNS_COLINEAR)],
+    train_data = pain_data[, names(pain_data) %in% c("Pressure2",COLUMNS_COLINEAR)],
     train_target = target_data,
     dataset_name = "Original unsplit only modifed variables"
   )
@@ -402,7 +311,7 @@ print(cohens_d_results$plot)
 # Save plot
 ggsave(
   plot = cohens_d_results$plot,
-  filename = paste0("cohens_d_with_ttests", ".svg"),
+  filename = paste0(DATASET_NAME, "_cohens_d_with_ttests", ".svg"),
   width = 10,
   height = 7
 )
@@ -442,7 +351,7 @@ print(detailed_results)
 # Save detailed Cohen's d results to CSV
 write.csv(
   detailed_results, 
-  paste0("cohens_d_with_ttests_results",  ".csv"),
+  paste0(DATASET_NAME, "_cohens_d_with_ttests_results",  ".csv"),
   row.names = FALSE
 )
 

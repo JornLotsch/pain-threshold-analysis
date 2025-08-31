@@ -13,15 +13,17 @@ This repository provides a flexible framework for analyzing classification datas
 
 ## Scripts
 ### Core Pipeline
-- - Main analysis pipeline with iterative feature refinement `iterative_feature_selection_and_classification.R`
 - - Core utility functions and classification algorithms `feature_selection_and_classification_functions.R`
 
 ### Pain Threshold Specific Scripts
-- - Correlation analysis and heatmap visualization `Pheno_125_correlation.R`
-- - Variance Inflation Factor analysis for multicollinearity detection `Pheno_125_VIF.R`
-- - Basic classification without iterative refinement `Pheno_125_RF_LR_kNN.R`
+- - Main analysis pipeline with iterative feature refinement for pain threshold data set: `Pheno_125_iterative_feature_selection_and_classification.R`
+- - Correlation analysis and heatmap visualization  for pain threshold data set: `Pheno_125_correlation.R`
+- - Variance Inflation Factor analysis for multicollinearity detection  for pain threshold data set: 
 
-### Experimental Analysis
+### PsA Data Specific Scripts
+- - Main analysis pipeline with iterative feature refinement for PsA data set: `PSA_das28_iterative_feature_selection_and_classification.R`
+
+### Analysis of Synthetic Data Set
 - - Example analysis on FCPS clustering datasets demonstrating pipeline flexibility `FCPS_experiments.R`
 
 ## Algorithm Workflow
@@ -52,3 +54,9 @@ This repository provides a flexible framework for analyzing classification datas
 - **Effect Size Calculation**: Cohen's d with confidence intervals
 - **Performance Metrics**: Balanced accuracy, AUC-ROC, confusion matrices
 - **Significance Testing**: t-tests for feature differences between classes
+
+## Additional Information
+### SPSS statistcial analyses for comparison
+- **Pheno_125_SPSS_regression_complete_dataset.pdf**: Regression analysis results of pain threshold data
+- **PSA_das28crp_SPSS_regression_complete_dataset.pdf**: Regression analysis results of psoriatic arthritis phenotype data
+

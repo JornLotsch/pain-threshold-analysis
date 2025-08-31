@@ -1,8 +1,9 @@
 ###############################################################################
 # Pain Thresholds Correlation Analysis
 # 
-# This script loads, preprocesses, analyzes, and visualizes correlations 
-# in pain threshold data using ComplexHeatmap with grouped variable annotations.
+# This script loads prepared pain threshold data (already renamed,
+# includes Target and Pressure2), then analyzes and visualizes correlations 
+# using ComplexHeatmap with grouped variable annotations.
 ###############################################################################
 
 # --- Libraries ---
@@ -15,20 +16,33 @@ library(grid)
 library(ggthemes)
 library(viridis)
 
-# --- Constants ---
-PAIN_DATA_FILE_PATH <- "/home/joern/Dokumente/PainGenesDrugs/08AnalyseProgramme/R/PainThresholdsData_transformed_imputed.csv"
-TARGET_FILE_PATH    <- "/home/joern/Dokumente/PainGenesDrugs/08AnalyseProgramme/R/PainThresholds.csv"
-SEED                <- 42              # Seed for reproducibility
-CORRELATION_METHOD   <- "pearson"       # Correlation calculation method
-CORRELATION_LIMIT    <- 0.9             # Threshold for correlation strength
-stepwise_corr_colors <- TRUE            # Use stepwise correlation coloring flag
-noise_factor <- 0.05
+###############################################################################
+# Configuration Parameters 
+###############################################################################
 
-PAIN_DATA_COLUMN_NAMES <- c(
-  "Heat", "Pressure", "Current", "Heat_Capsaicin",
-  "Capsaicin_Effect_Heat", "Cold", "Cold_Menthol", "Menthol_Effect_Cold",
-  "vonFrey", "vonFrey_Capsaicin", "Capsaicin_Effect_vonFrey"
-)
+PREPARED_DATA_FILE_PATH <- "/home/joern/Aktuell/ABCPython/08AnalyseProgramme/R/ABC2way/Pheno_125_prepared_data.csv"
+SEED                <- 42              # Seed for reproducibility
+CORRELATION_METHOD  <- "pearson"       # Correlation calculation method
+CORRELATION_LIMIT   <- 0.9             # Threshold for correlation strength
+stepwise_corr_colors <- TRUE           # Use stepwise correlation coloring flag
+
+DATASET_NAME <- "Pheno_125"
+EXPERIMENTS_DIR <- "/home/joern/.Datenplatte/Joerns Dateien/Aktuell/ABCPython/08AnalyseProgramme/R/ABC2way/"
+
+###############################################################################
+# Load External Functions and set actual path
+###############################################################################
+if (file.exists(FUNCTIONS_FILE_PATH)) {
+  source(FUNCTIONS_FILE_PATH)
+} else {
+  stop(paste("Functions file not found:", FUNCTIONS_FILE_PATH))
+}
+
+set_working_directory(EXPERIMENTS_DIR)
+
+###############################################################################
+# Load data and modify files when needed
+###############################################################################
 
 # --- Stimulus Types Grouping ---
 stimulus_types <- list(
@@ -38,47 +52,12 @@ stimulus_types <- list(
   "SensitizationEffect" = c("Capsaicin_Effect_Heat", "Menthol_Effect_Cold", "Capsaicin_Effect_vonFrey")
 )
 
-###############################################################################
-# --- Utility Functions ---
-###############################################################################
+# --- Load Prepared Data ---
+prepared_data <- read.csv(PREPARED_DATA_FILE_PATH, row.names = 1)
 
-# Load pain thresholds dataset from CSV file with row names
-load_pain_thresholds_data <- function(file_path) {
-  read.csv(file_path, row.names = 1)
-}
-
-# Load target variable vector from CSV file
-load_target_data <- function(file_path) {
-  read.csv(file_path, row.names = 1)$Target
-}
-
-# Rename columns of a data frame to standardized names
-rename_pain_data_columns <- function(data, new_names) {
-  names(data) <- new_names
-  data
-}
-
-# Function to determine text color based on background fill brightness
-text_color_fun <- function(fill_color) {
-  rgb_val <- col2rgb(fill_color) / 255
-  brightness <- 0.299 * rgb_val[1,] + 0.587 * rgb_val[2,] + 0.114 * rgb_val[3,]
-  ifelse(brightness > 0.6, "#111111", "#FFFFFF")  # dark text on light bg, white text on dark bg
-}
-
-###############################################################################
-# --- Data Loading and Preprocessing ---
-###############################################################################
-
-pain_data   <- load_pain_thresholds_data(PAIN_DATA_FILE_PATH)
-pain_data   <- rename_pain_data_columns(pain_data, PAIN_DATA_COLUMN_NAMES)
-target_data <- load_target_data(TARGET_FILE_PATH)
-
-# Set seed for reproducibility
-set.seed(SEED)
-
-# Add slight noise to duplicate Pressure as Pressure2 to avoid perfect correlation
-pain_data$Pressure2 <- pain_data$Pressure +
-  runif(length(pain_data$Pressure), min = -abs(pain_data$Pressure) * noise_factor, max = abs(pain_data$Pressure) * noise_factor)
+# Split into predictors and target if needed
+target_data <- prepared_data$Target
+pain_data   <- prepared_data[, !(colnames(prepared_data) %in% "Target")]
 
 ###############################################################################
 # --- Correlation Calculation ---
@@ -90,6 +69,13 @@ corr_mat_modifed  <- cor(pain_data, method = CORRELATION_METHOD)
 ###############################################################################
 # --- Color Mapping Setup for Heatmap ---
 ###############################################################################
+
+# Function to determine text color based on background fill brightness
+text_color_fun <- function(fill_color) {
+  rgb_val <- col2rgb(fill_color) / 255
+  brightness <- 0.299 * rgb_val[1,] + 0.587 * rgb_val[2,] + 0.114 * rgb_val[3,]
+  ifelse(brightness > 0.6, "#111111", "#FFFFFF")  # dark text on light bg, white text on dark bg
+}
 
 if (stepwise_corr_colors) {
   # Define breakpoints and stepwise range colors for correlation
@@ -231,6 +217,6 @@ gp <- grid.grabExpr(create_heatmap())
 grid.draw(gp)
 
 # Export the plot to an SVG file with specified dimensions
-svg("Pheono_125_correaltion_heatmap.svg", width = 13, height = 12)
+svg(paste0(DATASET_NAME, "_correaltion_heatmap.svg"), width = 13, height = 12)
 grid.draw(gp)
 dev.off()

@@ -1,7 +1,8 @@
 ###############################################################################
 # Pain Thresholds VIF Analysis with Extended Status Including NA Results
 #
-# This script loads pain threshold data, performs VIF analysis accounting for
+# This script loads *prepared pain threshold data* (already renamed,
+# includes target and noise column), performs VIF analysis accounting for
 # colinearity, aliasing, and additional NA results in coefficient p-values,
 # and visualizes the results as a clustered heatmap with detailed statuses.
 ###############################################################################
@@ -17,19 +18,20 @@ library(ggthemes)
 library(viridis)
 library(car)
 
-# --- Constants and Config ---
-PAIN_DATA_FILE_PATH <- "/home/joern/Dokumente/PainGenesDrugs/08AnalyseProgramme/R/PainThresholdsData_transformed_imputed.csv"
-TARGET_FILE_PATH    <- "/home/joern/Dokumente/PainGenesDrugs/08AnalyseProgramme/R/PainThresholds.csv"
-SEED                <- 42
-VIF_LIMIT            <- 10
-noise_factor <- 0.05
-significance_Level <- 0.05
+###############################################################################
+# Configuration Parameters 
+###############################################################################
 
-PAIN_DATA_COLUMN_NAMES <- c(
-  "Heat", "Pressure", "Current", "Heat_Capsaicin",
-  "Capsaicin_Effect_Heat", "Cold", "Cold_Menthol", "Menthol_Effect_Cold",
-  "vonFrey", "vonFrey_Capsaicin", "Capsaicin_Effect_vonFrey"
-)
+# --- Config ---
+PREPARED_DATA_FILE_PATH <- "/home/joern/Aktuell/ABCPython/08AnalyseProgramme/R/ABC2way/Pheno_125_prepared_data.csv"
+SEED                <- 42
+VIF_LIMIT           <- 10
+significance_Level  <- 0.05
+
+DATASET_NAME <- "Atom"
+EXPERIMENTS_DIR <- "/home/joern/.Datenplatte/Joerns Dateien/Aktuell/ABCPython/08AnalyseProgramme/R/ABC2way/"
+# External functions
+FUNCTIONS_FILE_PATH <- "/home/joern/.Datenplatte/Joerns Dateien/Aktuell/ABCPython/08AnalyseProgramme/R/ABC2way/feature_selection_and_classification_functions.R"
 
 stimulus_types <- list(
   "Mechanical"          = c("Pressure", "vonFrey", "vonFrey_Capsaicin", "Pressure2"),
@@ -38,44 +40,38 @@ stimulus_types <- list(
   "SensitizationEffect" = c("Capsaicin_Effect_Heat", "Menthol_Effect_Cold", "Capsaicin_Effect_vonFrey")
 )
 
-# --- Utility Functions ---
-load_pain_thresholds_data <- function(file_path) {
-  read.csv(file_path, row.names = 1)
-}
-load_target_data <- function(file_path) {
-  read.csv(file_path, row.names = 1)$Target
-}
-rename_pain_data_columns <- function(data, new_names) {
-  names(data) <- new_names
-  data
-}
-text_color_fun <- function(fill_color) {
-  rgb_val <- col2rgb(fill_color) / 255
-  brightness <- 0.299 * rgb_val[1, ] + 0.587 * rgb_val[2, ] + 0.114 * rgb_val[3, ]
-  ifelse(brightness > 0.6, "#111111", "#FFFFFF")
+###############################################################################
+# Load External Functions and set actual path
+###############################################################################
+if (file.exists(FUNCTIONS_FILE_PATH)) {
+  source(FUNCTIONS_FILE_PATH)
+} else {
+  stop(paste("Functions file not found:", FUNCTIONS_FILE_PATH))
 }
 
-# --- Data Loading and Preprocessing ---
-pain_data   <- load_pain_thresholds_data(PAIN_DATA_FILE_PATH)
-pain_data   <- rename_pain_data_columns(pain_data, PAIN_DATA_COLUMN_NAMES)
-target_data <- load_target_data(TARGET_FILE_PATH)
+set_working_directory(EXPERIMENTS_DIR)
 
-set.seed(SEED)
-pain_data$Pressure2 <- pain_data$Pressure +
-  runif(length(pain_data$Pressure), 
-        min = -abs(pain_data$Pressure) * noise_factor, 
-        max = abs(pain_data$Pressure) * noise_factor)
+###############################################################################
+# Load prepared data and further process them
+###############################################################################
+
+prepared_data <- read.csv(PREPARED_DATA_FILE_PATH, row.names = 1)
+
+# Split into pain data (features) and target
+target_data <- prepared_data$Target
+pain_data   <- prepared_data[, !(colnames(prepared_data) %in% "Target")]
 
 # --- VIF Candidates and Subset Preparation ---
 VIF_candidate_var_names <- c("Capsaicin_Effect_Heat", "Menthol_Effect_Cold", 
                              "Capsaicin_Effect_vonFrey", "Pressure2")
+
 subsets_to_remove <- lapply(1:length(VIF_candidate_var_names), function(n) 
   combn(VIF_candidate_var_names, n, simplify=FALSE))
 subsets_to_remove <- unlist(subsets_to_remove, recursive=FALSE)
 subsets_to_remove <- append(subsets_to_remove, "")  # baseline with no vars removed
-#subsets_to_remove <- append(subsets_to_remove, list(setdiff(as.vector(unlist(stimulus_types)), VIF_candidate_var_names)))# only possibly colinear variables
 
-df_orig_4_lr <- cbind.data.frame(pain_data, Target = target_data)
+df_orig_4_lr <- prepared_data
+
 df_orig_4_lr_cleaned <- df_orig_4_lr[, !names(df_orig_4_lr) %in% VIF_candidate_var_names]
 lr_res_cleaned <- glm(Target ~ ., data = df_orig_4_lr_cleaned, family = binomial)
 p_values_cleaned <- summary(lr_res_cleaned)$coefficients[, 4]
@@ -87,6 +83,10 @@ p_values_alternative <- summary(lr_res_alternative)$coefficients[, 4]
 significant_vars_alternative <- names(p_values_alternative)[p_values_alternative < significance_Level]
 significant_vars_cleaned <- append(significant_vars_cleaned, significant_vars_alternative)
 significant_vars_cleaned <- significant_vars_cleaned[!significant_vars_cleaned %in% "(Intercept)"]
+
+###############################################################################
+# Main analysis of aliased variables and VIF
+###############################################################################
 
 # --- Extended VIF and Aliasing Analysis Including NA Results ---
 aliased <- lapply(seq_along(subsets_to_remove), function(i) {
@@ -141,6 +141,10 @@ aliased <- lapply(seq_along(subsets_to_remove), function(i) {
   )
   
 })
+
+###############################################################################
+# --- Plot Results ---
+###############################################################################
 
 # --- Construct Matrix for Heatmap Visualization ---
 all_vars <- colnames(pain_data)
@@ -257,6 +261,6 @@ gp_VIF <- grid.grabExpr(create_clustered_heatmap())
 grid.draw(gp_VIF)
 
 # Export the plot to an SVG file with specified dimensions
-svg("Pheono_125_LR_VIF.svg", width = 13, height = 12)
+svg("Pheno_125_LR_VIF.svg", width = 13, height = 12)
 grid.draw(gp_VIF)
 dev.off()

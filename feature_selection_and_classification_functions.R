@@ -20,6 +20,48 @@ library(glmnet)             # LASSO/logistic regression utilities
 library(car)                # Linear and generalized linear model diagnostic tools
 
 ###############################################################################
+# Set working directory  ------------------------------------------
+###############################################################################
+
+set_working_directory <- function(EXPERIMENTS_DIR = NULL) {
+  # Attempt to set working directory to script location (for RStudio)
+  tryCatch({
+    if (requireNamespace("rstudioapi", quietly = TRUE) &&
+        rstudioapi::isAvailable("getSourceEditorContext")) {
+      script_path <- rstudioapi::getSourceEditorContext()$path
+      if (!is.null(script_path) && nzchar(script_path)) {
+        setwd(dirname(script_path))
+        cat("Working directory set to script location:", getwd(), "\n")
+      }
+    }
+  }, error = function(e) {
+    message("Unable to set working directory automatically: ", e$message)
+  })
+  
+  # If EXPERIMENTS_DIR is provided, try switching to it
+  if (!is.null(EXPERIMENTS_DIR)) {
+    if (dir.exists(EXPERIMENTS_DIR)) {
+      tryCatch({
+        setwd(EXPERIMENTS_DIR)
+        cat("Working directory changed to:", getwd(), "\n")
+      }, error = function(e) {
+        warning("Failed to change to experiments directory: ", e$message)
+        cat("Continuing with current directory:", getwd(), "\n")
+      })
+    } else {
+      warning("Experiments directory does not exist: ", EXPERIMENTS_DIR)
+      cat("Continuing with current directory:", getwd(), "\n")
+    }
+  }
+  
+  # Verify current working directory
+  cat("Current working directory:", getwd(), "\n")
+  
+  invisible(getwd()) # return the working dir without printing
+}
+
+
+###############################################################################
 # Utility and Preprocessing Functions ------------------------------------------
 ###############################################################################
 
@@ -84,35 +126,31 @@ nyt_theme <- function() {
 
 run_classifier_multiple_times <- function(train_data, train_target, test_data, test_target,
                                           classifier_type = "RF", n_runs = 100) {
-  
   train_df_all <- as.data.frame(train_data)
   test_df_all <- as.data.frame(test_data)
-  
   # Check for invalid values in features
   if (any(!is.finite(as.matrix(train_df_all)))) stop("Training data contains NA/NaN/Inf")
   if (any(!is.finite(as.matrix(test_df_all)))) stop("Test data contains NA/NaN/Inf")
-  
   ba_results <- numeric(n_runs)
   auc_results <- numeric(n_runs)
   
   # Quick tune RF
   if (classifier_type == "RF" && tune_RF) {
-    if (ncol(train_df_all) > 1) {
-      mtry_values <- c(1, 2)
+    if (!mtry_12only) {
+      mtry_values <- unique(round(c(2, sqrt(ncol(train_df)), ncol(train_df) / 2)))
     } else {
-      mtry_values <- 1
+      if (ncol(train_df_all) > 1) {
+        mtry_values <- c(1, 2)
+      } else {
+        mtry_values <- 1
+      }
     }
     ntree_values <- c(500, 1000)
-    
     grid <- expand.grid(mtry = mtry_values, ntree = ntree_values)
     grid$error <- NA
-    
-    # Store errors per run per grid point
     errors_matrix <- matrix(NA, nrow = nrow(grid), ncol = 10)
-    
     for (run in 1:10) {
-      set.seed(SEED + run)  # Different seed each run
-      
+      set.seed(SEED + run)
       for (i in 1:nrow(grid)) {
         model <- randomForest(
           x = train_df_all,
@@ -120,39 +158,30 @@ run_classifier_multiple_times <- function(train_data, train_target, test_data, t
           mtry = grid$mtry[i],
           ntree = grid$ntree[i]
         )
-        errors_matrix[i, run] <- mean(model$err.rate[, 1])  # OOB classification error
+        errors_matrix[i, run] <- mean(model$err.rate[, 1]) 
       }
     }
-    
-    # Compute median error across runs for each hyperparameter combo
     grid$median_error <- apply(errors_matrix, 1, median)
-    
-    # Select best hyperparameters based on median error
-    best <- grid[which.min(grid$median_error), ]
-  }
-  
+    best <- grid[which.min(grid$median_error),]
+  } 
   
   for (i in 1:n_runs) {
     tryCatch({
-      
-      set.seed(i) # Different seed for each run
-      
+      set.seed(i)
       if (training_and_validation_subsplits) {
-        # Training and validation splits
         inTraining <- caret::createDataPartition(
           train_target,
           p = TRAINING_PARTITION_SIZE,
           list = FALSE
         )
-        train_df <- train_df_all[inTraining, , drop = FALSE]  # keep as data frame
+        train_df <- train_df_all[inTraining,, drop = FALSE]
         train_target_factor <- as.factor(train_target[inTraining])
-        
         inValidation <- caret::createDataPartition(
           test_target,
           p = VALIDATION_PARTITION_SIZE,
           list = FALSE
         )
-        test_df <- test_df_all[inValidation, , drop = FALSE]  # keep as data frame
+        test_df <- test_df_all[inValidation,, drop = FALSE]
         test_target_factor <- as.factor(test_target[inValidation])
       } else {
         train_df <- train_df_all
@@ -163,84 +192,71 @@ run_classifier_multiple_times <- function(train_data, train_target, test_data, t
       levels(test_target_factor) <- levels(train_target_factor)
       
       if (classifier_type == "RF") {
-        # Random Forest
         if (length(levels(train_target_factor)) < 2) stop("Less than 2 classes in training data")
-        
         if (tune_RF) {
           model <- randomForest(
             x = train_df,
-            y = train_target_factor,
+            y = as.factor(train_target_factor),
             mtry = best$mtry,
             ntree = best$ntree
           )
         } else {
-          model <- randomForest(x = train_df, y = train_target_factor, ntree = 500)
+          model <- randomForest(x = train_df, y = train_target_factor)
         }
-        
         pred <- predict(model, test_df, type = "class")
         prob <- predict(model, test_df, type = "prob")
-        
         if (ncol(prob) >= 2) {
           roc_obj <- pROC::roc(as.numeric(test_target_factor), prob[, 2], quiet = TRUE)
           auc_results[i] <- as.numeric(roc_obj$auc)
         } else {
           auc_results[i] <- NA
         }
-        
         cm <- caret::confusionMatrix(pred, test_target_factor)
         ba_results[i] <- cm$byClass["Balanced Accuracy"]
         
       } else if (classifier_type == "LR") {
-        # Logistic Regression
         if (length(levels(train_target_factor)) < 2) stop("Less than 2 classes in training data")
-        
         lr_train_data <- train_df
-        lr_train_data$target <- train_target_factor
-        
+        lr_train_data$target <- as.factor(train_target_factor)
         formula_str <- if (ncol(train_data) == 1) {
           paste("target ~", names(train_data)[1])
         } else {
           "target ~ ."
         }
-        
         model <- glm(as.formula(formula_str), data = lr_train_data, family = binomial)
         prob_vec <- predict(model, test_df, type = "response")
-        
         target_levels <- levels(train_target_factor)
         pred <- as.factor(ifelse(prob_vec > 0.5,
                                  target_levels[2],
                                  target_levels[1]))
-        
         roc_obj <- pROC::roc(as.numeric(test_target_factor), prob_vec, quiet = TRUE)
         auc_results[i] <- as.numeric(roc_obj$auc)
-        
         cm <- caret::confusionMatrix(pred, test_target_factor)
         ba_results[i] <- cm$byClass["Balanced Accuracy"]
         
       } else if (classifier_type == "KNN") {
-        # K Nearest Neighbors (caret)
         knn_train_data <- train_df
         knn_train_data$target <- as.factor(train_target_factor)
-        
         if (length(levels(knn_train_data$target)) < 2) stop("Less than 2 classes in training data")
-        
         levels(knn_train_data$target) <- c("Class0", "Class1")
         
         ctrl <- caret::trainControl(method = "cv", number = 5,
                                     classProbs = TRUE, summaryFunction = twoClassSummary)
         
-        model <- caret::train(
-          target ~ ., data = knn_train_data,
-          method = "knn",
-          trControl = ctrl,
-          metric = "ROC",
-          preProcess = c("center", "scale"),
-          tuneLength = 5
+        # Suppress warnings temporarily just during caret::train
+        model <- suppressWarnings(
+          caret::train(
+            target ~ ., data = knn_train_data,
+            method = "knn",
+            trControl = ctrl,
+            metric = "ROC",
+            preProcess = c("center", "scale"),
+            tuneLength = 5
+          )
         )
         
         pred <- predict(model, test_df)
         prob <- predict(model, test_df, type = "prob")
-        
         levels(test_target_factor) <- c("Class0", "Class1")
         
         roc_obj <- pROC::roc(as.numeric(test_target_factor), prob[, "Class1"], quiet = TRUE)
@@ -248,22 +264,40 @@ run_classifier_multiple_times <- function(train_data, train_target, test_data, t
         
         cm <- caret::confusionMatrix(pred, test_target_factor)
         ba_results[i] <- cm$byClass["Balanced Accuracy"]
+      } else if (classifier_type == "C50") {
+        if (!requireNamespace("C50", quietly = TRUE)) stop("C50 package not installed")
+        if (length(levels(train_target_factor)) < 2) stop("Less than 2 classes in training data")
+        train_data_c50 <- train_df
+        train_data_c50$target <- as.factor(train_target_factor)
+        formula_str <- if (ncol(train_df) == 1) {
+          paste("target ~", names(train_df)[1])
+        } else {
+          "target ~ ."
+        }
+        model <- C50::C5.0(as.formula(formula_str), data = train_data_c50)
+        pred <- predict(model, test_df, type = "class")
+        prob <- predict(model, test_df, type = "prob")
+        if (ncol(prob) >= 2) {
+          roc_obj <- pROC::roc(as.numeric(test_target_factor), prob[, 2], quiet = TRUE)
+          auc_results[i] <- as.numeric(roc_obj$auc)
+        } else {
+          auc_results[i] <- NA
+        }
+        cm <- caret::confusionMatrix(pred, test_target_factor)
+        ba_results[i] <- cm$byClass["Balanced Accuracy"]
         
       } else {
         stop("Unsupported classifier_type")
       }
-      
     }, error = function(e) {
       ba_results[i] <<- NA
       auc_results[i] <<- NA
     })
-    
-    if (i %% 20 == 0) cat(".") # Progress indicator
+    if (i %% 20 == 0) cat(".")
   }
   
   valid_ba <- ba_results[!is.na(ba_results)]
   valid_auc <- auc_results[!is.na(auc_results)]
-  
   if (length(valid_ba) < 10) {
     return(list(
       ba_mean = NA, ba_ci_lower = NA, ba_ci_upper = NA,
@@ -271,7 +305,6 @@ run_classifier_multiple_times <- function(train_data, train_target, test_data, t
       n_successful = length(valid_ba)
     ))
   }
-  
   ba_ci_lower <- stats::quantile(valid_ba, 0.025, na.rm = TRUE)
   ba_ci_upper <- stats::quantile(valid_ba, 0.975, na.rm = TRUE)
   auc_ci_lower <- stats::quantile(valid_auc, 0.025, na.rm = TRUE)
@@ -288,25 +321,21 @@ run_classifier_multiple_times <- function(train_data, train_target, test_data, t
   ))
 }
 
+
 # Classification function with 100 runs
 quick_classify_100_runs <- function(train_data, train_target, test_data, test_target, dataset_name) {
-  
   cat(sprintf("\n--- %s (%d features) ---\n", dataset_name, ncol(train_data)))
-  
   if (ncol(train_data) == 0 || nrow(train_data) == 0) {
     cat("No data available - skipping\n")
     return(NULL)
   }
-  
   results <- list()
   
-  # === RANDOM FOREST ===
+  # RF
   cat("Running Random Forest 100 times")
   rf_results <- run_classifier_multiple_times(train_data, train_target, test_data, test_target, "RF", 100)
   cat(sprintf(" (%d successful runs)\n", rf_results$n_successful))
-  
   results$RF <- rf_results
-  
   if (!is.na(rf_results$ba_mean)) {
     cat(sprintf("RF - BA: %.3f [%.3f, %.3f], AUC: %.3f [%.3f, %.3f]\n",
                 rf_results$ba_mean, rf_results$ba_ci_lower, rf_results$ba_ci_upper,
@@ -315,13 +344,11 @@ quick_classify_100_runs <- function(train_data, train_target, test_data, test_ta
     cat("RF - Failed to get valid results\n")
   }
   
-  # === LOGISTIC REGRESSION ===
+  # LR
   cat("Running Logistic Regression 100 times")
   lr_results <- run_classifier_multiple_times(train_data, train_target, test_data, test_target, "LR", 100)
   cat(sprintf(" (%d successful runs)\n", lr_results$n_successful))
-  
   results$LR <- lr_results
-  
   if (!is.na(lr_results$ba_mean)) {
     cat(sprintf("LR - BA: %.3f [%.3f, %.3f], AUC: %.3f [%.3f, %.3f]\n",
                 lr_results$ba_mean, lr_results$ba_ci_lower, lr_results$ba_ci_upper,
@@ -330,13 +357,11 @@ quick_classify_100_runs <- function(train_data, train_target, test_data, test_ta
     cat("LR - Failed to get valid results\n")
   }
   
-  # === K NEAREST NEIGHBORS ===
+  # KNN
   cat("Running KNN 100 times")
   knn_results <- run_classifier_multiple_times(train_data, train_target, test_data, test_target, "KNN", 100)
   cat(sprintf(" (%d successful runs)\n", knn_results$n_successful))
-  
   results$KNN <- knn_results
-  
   if (!is.na(knn_results$ba_mean)) {
     cat(sprintf("KNN - BA: %.3f [%.3f, %.3f], AUC: %.3f [%.3f, %.3f]\n",
                 knn_results$ba_mean, knn_results$ba_ci_lower, knn_results$ba_ci_upper,
@@ -345,12 +370,23 @@ quick_classify_100_runs <- function(train_data, train_target, test_data, test_ta
     cat("KNN - Failed to get valid results\n")
   }
   
+  # C5.0
+  cat("Running C5.0 100 times")
+  c50_results <- run_classifier_multiple_times(train_data, train_target, test_data, test_target, "C50", 100)
+  cat(sprintf(" (%d successful runs)\n", c50_results$n_successful))
+  results$C50 <- c50_results
+  if (!is.na(c50_results$ba_mean)) {
+    cat(sprintf("C5.0 - BA: %.3f [%.3f, %.3f], AUC: %.3f [%.3f, %.3f]\n",
+                c50_results$ba_mean, c50_results$ba_ci_lower, c50_results$ba_ci_upper,
+                c50_results$auc_mean, c50_results$auc_ci_lower, c50_results$auc_ci_upper))
+  } else {
+    cat("C5.0 - Failed to get valid results\n")
+  }
+  
   return(results)
 }
 
-
 create_results_table <- function(test_results, datasets_to_test) {
-  # Define columns based on flag
   if (use_roc_auc) {
     results_df <- data.frame(
       Dataset = character(),
@@ -361,6 +397,8 @@ create_results_table <- function(test_results, datasets_to_test) {
       LR_AUC = character(),
       KNN_BA = character(),
       KNN_AUC = character(),
+      C50_BA = character(),
+      C50_AUC = character(),
       Classification_Success = integer(),
       stringsAsFactors = FALSE
     )
@@ -371,62 +409,55 @@ create_results_table <- function(test_results, datasets_to_test) {
       RF_BA = character(),
       LR_BA = character(),
       KNN_BA = character(),
+      C50_BA = character(),
       Classification_Success = integer(),
       stringsAsFactors = FALSE
     )
   }
-  
   for (name in names(test_results)) {
     if (!is.null(test_results[[name]])) {
-      
-      # ---- RF ----
       rf_res <- test_results[[name]]$RF
       if (!is.na(rf_res$ba_mean)) {
         rf_ba_str <- sprintf("%.3f [%.3f, %.3f]", rf_res$ba_mean, rf_res$ba_ci_lower, rf_res$ba_ci_upper)
-        if (use_roc_auc) {
-          rf_auc_str <- sprintf("%.3f [%.3f, %.3f]", rf_res$auc_mean, rf_res$auc_ci_lower, rf_res$auc_ci_upper)
-        }
+        if (use_roc_auc) rf_auc_str <- sprintf("%.3f [%.3f, %.3f]", rf_res$auc_mean, rf_res$auc_ci_lower, rf_res$auc_ci_upper) else rf_auc_str <- NULL
       } else {
         rf_ba_str <- "NA"
-        if (use_roc_auc) {
-          rf_auc_str <- "NA"
-        }
+        if (use_roc_auc) rf_auc_str <- "NA" else rf_auc_str <- NULL
       }
       
-      # ---- LR ----
       lr_res <- test_results[[name]]$LR
       if (!is.na(lr_res$ba_mean)) {
         lr_ba_str <- sprintf("%.3f [%.3f, %.3f]", lr_res$ba_mean, lr_res$ba_ci_lower, lr_res$ba_ci_upper)
-        if (use_roc_auc) {
-          lr_auc_str <- sprintf("%.3f [%.3f, %.3f]", lr_res$auc_mean, lr_res$auc_ci_lower, lr_res$auc_ci_upper)
-        }
+        if (use_roc_auc) lr_auc_str <- sprintf("%.3f [%.3f, %.3f]", lr_res$auc_mean, lr_res$auc_ci_lower, lr_res$auc_ci_upper) else lr_auc_str <- NULL
       } else {
         lr_ba_str <- "NA"
-        if (use_roc_auc) {
-          lr_auc_str <- "NA"
-        }
+        if (use_roc_auc) lr_auc_str <- "NA" else lr_auc_str <- NULL
       }
       
-      # ---- KNN ----
       knn_res <- test_results[[name]]$KNN
       if (!is.na(knn_res$ba_mean)) {
         knn_ba_str <- sprintf("%.3f [%.3f, %.3f]", knn_res$ba_mean, knn_res$ba_ci_lower, knn_res$ba_ci_upper)
-        if (use_roc_auc) {
-          knn_auc_str <- sprintf("%.3f [%.3f, %.3f]", knn_res$auc_mean, knn_res$auc_ci_lower, knn_res$auc_ci_upper)
-        }
+        if (use_roc_auc) knn_auc_str <- sprintf("%.3f [%.3f, %.3f]", knn_res$auc_mean, knn_res$auc_ci_lower, knn_res$auc_ci_upper) else knn_auc_str <- NULL
       } else {
         knn_ba_str <- "NA"
-        if (use_roc_auc) {
-          knn_auc_str <- "NA"
-        }
+        if (use_roc_auc) knn_auc_str <- "NA" else knn_auc_str <- NULL
       }
       
-      # ---- Success flag ----
+      c50_res <- test_results[[name]]$C50
+      if (!is.na(c50_res$ba_mean)) {
+        c50_ba_str <- sprintf("%.3f [%.3f, %.3f]", c50_res$ba_mean, c50_res$ba_ci_lower, c50_res$ba_ci_upper)
+        if (use_roc_auc) c50_auc_str <- sprintf("%.3f [%.3f, %.3f]", c50_res$auc_mean, c50_res$auc_ci_lower, c50_res$auc_ci_upper) else c50_auc_str <- NULL
+      } else {
+        c50_ba_str <- "NA"
+        if (use_roc_auc) c50_auc_str <- "NA" else c50_auc_str <- NULL
+      }
+      
       if (use_roc_auc) {
         success_flag <- any(
           rf_res$ba_ci_lower > 0.5, rf_res$auc_ci_lower > 0.5,
           lr_res$ba_ci_lower > 0.5, lr_res$auc_ci_lower > 0.5,
           knn_res$ba_ci_lower > 0.5, knn_res$auc_ci_lower > 0.5,
+          c50_res$ba_ci_lower > 0.5, c50_res$auc_ci_lower > 0.5,
           na.rm = TRUE
         )
       } else {
@@ -434,11 +465,10 @@ create_results_table <- function(test_results, datasets_to_test) {
           rf_res$ba_ci_lower > 0.5,
           lr_res$ba_ci_lower > 0.5,
           knn_res$ba_ci_lower > 0.5,
+          c50_res$ba_ci_lower > 0.5,
           na.rm = TRUE
         )
       }
-      
-      # Append row based on flag
       if (use_roc_auc) {
         results_df <- rbind(results_df, data.frame(
           Dataset = name,
@@ -449,6 +479,8 @@ create_results_table <- function(test_results, datasets_to_test) {
           LR_AUC = lr_auc_str,
           KNN_BA = knn_ba_str,
           KNN_AUC = knn_auc_str,
+          C50_BA = c50_ba_str,
+          C50_AUC = c50_auc_str,
           Classification_Success = as.integer(success_flag),
           stringsAsFactors = FALSE
         ))
@@ -459,6 +491,7 @@ create_results_table <- function(test_results, datasets_to_test) {
           RF_BA = rf_ba_str,
           LR_BA = lr_ba_str,
           KNN_BA = knn_ba_str,
+          C50_BA = c50_ba_str,
           Classification_Success = as.integer(success_flag),
           stringsAsFactors = FALSE
         ))
@@ -467,7 +500,6 @@ create_results_table <- function(test_results, datasets_to_test) {
   }
   return(results_df)
 }
-
 
 
 ###############################################################################
@@ -867,7 +899,7 @@ run_analysis_pipeline <- function(processed_data = NULL, use_curated_subset = FA
   
   boruta_selected <- boruta_res$selected
   boruta_rejected <- boruta_res$rejected
-
+  
   
   # # Handle case where no features are selected by Boruta
   # if (length(boruta_selected) == 0) {
@@ -987,49 +1019,64 @@ run_analysis_pipeline <- function(processed_data = NULL, use_curated_subset = FA
       y = "Number of features"
     )
   if (use_nyt) summary_plot <- summary_plot + nyt_theme() + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
-
+  
   # Run classification experiments
   cat("\nRunning classification experiments...\n")
   
-  # Define datasets to test
+  # Attempt to get highly correlated vars to drop; handle errors if cor() fails
+  high_corr_vars <- character(0)  # default empty
+  
+  try({
+    res <- find_variables_to_drop_caret(
+      data = training_data_actual,
+      method = CORRELATION_METHOD,
+      cutoff = CORRELATION_LIMIT
+    )
+    if (!is.null(res) && length(res$vars_to_drop) > 0) {
+      high_corr_vars <- res$vars_to_drop
+    }
+  }, silent = TRUE)
+  
+  # Build datasets_to_test list
   datasets_to_test <- list(
     "All_Features" = list(
       train = training_data_actual,
-      test = validation_data_actual
+      test  = validation_data_actual
     ),
     "Boruta_Selected" = list(
       train = if (length(boruta_selected) > 0) training_data_actual[, boruta_selected, drop = FALSE] else data.frame(),
-      test = if (length(boruta_selected) > 0) validation_data_actual[, boruta_selected, drop = FALSE] else data.frame()
+      test  = if (length(boruta_selected) > 0) validation_data_actual[, boruta_selected, drop = FALSE] else data.frame()
     ),
     "Boruta_Rejected" = list(
       train = if (length(boruta_rejected) > 0) training_data_actual[, boruta_rejected, drop = FALSE] else data.frame(),
-      test = if (length(boruta_rejected) > 0) validation_data_actual[, boruta_rejected, drop = FALSE] else data.frame()
+      test  = if (length(boruta_rejected) > 0) validation_data_actual[, boruta_rejected, drop = FALSE] else data.frame()
     ),
     "LASSO_Selected" = list(
       train = if (length(lasso_selected) > 0) training_data_actual[, lasso_selected, drop = FALSE] else data.frame(),
-      test = if (length(lasso_selected) > 0) validation_data_actual[, lasso_selected, drop = FALSE] else data.frame()
+      test  = if (length(lasso_selected) > 0) validation_data_actual[, lasso_selected, drop = FALSE] else data.frame()
     ),
     "LASSO_Rejected" = list(
       train = if (length(lasso_rejected) > 0) training_data_actual[, lasso_rejected, drop = FALSE] else data.frame(),
-      test = if (length(lasso_rejected) > 0) validation_data_actual[, lasso_rejected, drop = FALSE] else data.frame()
+      test  = if (length(lasso_rejected) > 0) validation_data_actual[, lasso_rejected, drop = FALSE] else data.frame()
     ),
     "Boruta_LASSO_Selected" = list(
-      train = if (length(boruta_selected) > 0 || length(lasso_selected) > 0) 
+      train = if ((length(boruta_selected) + length(lasso_selected)) > 0) 
         training_data_actual[, union(boruta_selected, lasso_selected), drop = FALSE] else data.frame(),
-      test = if (length(boruta_selected) > 0 || length(lasso_selected) > 0) 
+      test  = if ((length(boruta_selected) + length(lasso_selected)) > 0) 
         validation_data_actual[, union(boruta_selected, lasso_selected), drop = FALSE] else data.frame()
     ),
     "Boruta_LASSO_Rejected" = list(
-      train = if (length(boruta_rejected) > 0 || length(lasso_rejected) > 0)  
+      train = if ((length(boruta_rejected) + length(lasso_rejected)) > 0)  
         training_data_actual[, setdiff(names(training_data_actual), union(boruta_selected, lasso_selected)), drop = FALSE] else data.frame(),
-      test = if (length(boruta_rejected) > 0 || length(lasso_rejected) > 0)
+      test  = if ((length(boruta_rejected) + length(lasso_rejected)) > 0)
         validation_data_actual[, setdiff(names(training_data_actual), union(boruta_selected, lasso_selected)), drop = FALSE] else data.frame()
     ),
     "Only_high_correlated" = list(
-      train = data.frame(Pressure2 = training_data_actual[find_variables_to_drop_caret(data = training_data_actual, method = CORRELATION_METHOD, cutoff = CORRELATION_LIMIT)$vars_to_drop]),
-      test = data.frame(Pressure2 = validation_data_actual[find_variables_to_drop_caret(data = training_data_actual, method = CORRELATION_METHOD, cutoff = CORRELATION_LIMIT)$vars_to_drop])
+      train = if (length(high_corr_vars) > 0) training_data_actual[, high_corr_vars, drop = FALSE] else data.frame(),
+      test  = if (length(high_corr_vars) > 0) validation_data_actual[, high_corr_vars, drop = FALSE] else data.frame()
     )
   )
+  
   
   # Run classification tests
   test_results <- list()
@@ -1064,3 +1111,113 @@ run_analysis_pipeline <- function(processed_data = NULL, use_curated_subset = FA
   ))
 }
 
+###############################################################################
+# --- Iterative Analysis Function ---
+###############################################################################
+
+run_feature_selection_iterations <- function() {
+  all_results_feature_selection <- list()
+  
+  # --- Run analysis on full dataset ---
+  full_results <- run_analysis_pipeline(
+    training_data_actual   = training_data_original,
+    training_target        = training_target,
+    validation_data_actual = validation_data_original,
+    validation_target      = validation_target,
+    use_curated_subset     = FALSE,
+    curated_names          = NULL,
+    add_file_string        = "_full"
+  )
+  all_results_feature_selection[["Full dataset"]] <- full_results
+  if (!is.null(full_results$plots$matrix)) print(full_results$plots$matrix)
+  
+  boruta_res     <- get_boruta_features(full_results$boruta_results$finalDecision, Boruta_tentative_in)
+  boruta_selected <- boruta_res$selected
+  lasso_selected  <- full_results$lasso_results$selected
+  available_features <- names(training_data_original)
+  curated_features   <- setdiff(available_features, union(boruta_selected, lasso_selected))
+  
+  results_table_full <- full_results$results_table
+  rejected_indices_full <- which(grepl("rejected", results_table_full$Dataset, ignore.case = TRUE))
+  continue_iteration_after_full <- any(results_table_full[rejected_indices_full,"Classification_Success"] == 1)
+  
+  all_curated_results <- list()
+  iteration <- 0
+  
+  if (continue_iteration_after_full) {
+    classification_success_values <- c(1)
+    while (length(curated_features) > 0 && any(classification_success_values != 0) && iteration < max_iterations) {
+      iteration <- iteration + 1
+      cat(sprintf("Iteration %d: running curated subset with %d features\n", iteration, length(curated_features)))
+      curated_results <- run_analysis_pipeline(
+        training_data_actual   = training_data_original,
+        training_target        = training_target,
+        validation_data_actual = validation_data_original,
+        validation_target      = validation_target,
+        use_curated_subset     = TRUE,
+        curated_names          = curated_features,
+        add_file_string        = paste0("_curated_iter", iteration)
+      )
+      all_curated_results[[paste0("Iter_", iteration)]] <- curated_results
+      if (!is.null(curated_results$plots$matrix)) print(curated_results$plots$matrix)
+      results_table <- curated_results$results_table
+      rejected_indices <- grepl("rejected", results_table$Dataset, ignore.case = TRUE)
+      continue_iteration <- any(results_table$Classification_Success[rejected_indices] == 1)
+      if (continue_iteration) {
+        boruta_res    <- get_boruta_features(curated_results$boruta_results$finalDecision, Boruta_tentative_in)
+        boruta_selected <- boruta_res$selected
+        lasso_selected  <- curated_results$lasso_results$selected
+        curated_features <- setdiff(curated_features, union(boruta_selected, lasso_selected))
+        classification_success_values <- results_table$Classification_Success
+      } else {
+        cat("No rejected datasets with Classification_Success == 1, stopping iteration.\n")
+        classification_success_values <- rep(0, length(results_table$Classification_Success))
+      }
+    }
+  }
+  
+  if (RUN_ONE_ADDITIONAL_ITERATION) {
+    # Run last iteration manually after the loop if desired
+    boruta_res <- get_boruta_features(curated_results$boruta_results$finalDecision, Boruta_tentative_in)
+    boruta_selected <- boruta_res$selected
+    lasso_selected <- curated_results$lasso_results$selected
+    curated_features <- setdiff(curated_features, union(boruta_selected, lasso_selected))
+    
+    if (!(length(curated_features) > 0 && any(classification_success_values != 0) && iteration < max_iterations)) {
+      iteration <- iteration + 1
+      cat(sprintf("Final iteration %d: running curated subset with %d features\n", iteration, length(curated_features)))
+      curated_results <- run_analysis_pipeline(
+        training_data_actual = training_data_original,
+        training_target = training_target,
+        validation_data_actual = validation_data_original,
+        validation_target = validation_target,
+        use_curated_subset = TRUE,
+        curated_names = curated_features,
+        add_file_string = paste0("_curated_iter", iteration + 1)
+      )
+      all_curated_results[[paste0("Iter_", iteration)]] <- curated_results
+      print(curated_results$plots$matrix)
+    }
+  }
+  
+  
+  # Combine all results
+  full_results_table <- all_results_feature_selection[["Full dataset"]]$results_table
+  full_results_table$Iteration <- "Full dataset"
+  combined_results_table <- full_results_table
+  if (length(all_curated_results) > 0) {
+    for(iter_name in names(all_curated_results)) {
+      iter_table <- all_curated_results[[iter_name]]$results_table
+      iter_table$Iteration <- iter_name
+      combined_results_table <- rbind(combined_results_table, iter_table)
+    }
+    all_results_feature_selection[["Curated subset iterations"]] <- all_curated_results
+  }
+  write.csv(combined_results_table,
+            paste0(DATASET_NAME, "_ML_results_df_table.csv"))
+  cat("\n=== ANALYSIS COMPLETE ===\n")
+  return(list(
+    results_list = all_results_feature_selection,
+    combined_table = combined_results_table
+  ))
+}
