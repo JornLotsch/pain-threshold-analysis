@@ -222,7 +222,7 @@ if (!use_cleaned_mat) {
     mat[i, res$vars_removed] <- 0
   }
 
-  my_colors <- c("ghostwhite", "lightskyblue1", "rosybrown1", "grey50")
+  my_colors <- c("ghostwhite", "lightskyblue1", colorblind[2], "grey50")
   #my_colors <- ggthemes::colorblind_pal()(8)[2:8]
   col_fun <- circlize::colorRamp2(
     c(0, 1, 2, 3), my_colors
