@@ -29,7 +29,7 @@ VIF_LIMIT <- 10
 significance_Level <- 0.05
 use_cleaned_mat <- TRUE # Since aliased, colinear, not checked overwrite each other making the mat legend difficult to understand 
 
-DATASET_NAME <- "Atom"
+DATASET_NAME <- "Pheno_125"
 EXPERIMENTS_DIR <- "/home/joern/.Datenplatte/Joerns Dateien/Aktuell/ABCPython/08AnalyseProgramme/R/ABC2way/"
 # External functions
 FUNCTIONS_FILE_PATH <- "/home/joern/.Datenplatte/Joerns Dateien/Aktuell/ABCPython/08AnalyseProgramme/R/ABC2way/feature_selection_and_classification_functions.R"
@@ -309,6 +309,6 @@ gp_VIF <- grid.grabExpr(create_clustered_heatmap())
 grid.draw(gp_VIF)
 
 # Export the plot to an SVG file with specified dimensions
-svg("Pheno_125_LR_VIF.svg", width = 13, height = 12)
+svg(paste0(DATASET_NAME, "_LR_VIF.svg"), width = 13, height = 12)
 grid.draw(gp_VIF)
 dev.off()
