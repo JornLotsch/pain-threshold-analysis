@@ -24,9 +24,10 @@ library(car)
 
 # --- Config ---
 PREPARED_DATA_FILE_PATH <- "/home/joern/Aktuell/ABCPython/08AnalyseProgramme/R/ABC2way/Pheno_125_prepared_data.csv"
-SEED                <- 42
-VIF_LIMIT           <- 10
-significance_Level  <- 0.05
+SEED <- 42
+VIF_LIMIT <- 10
+significance_Level <- 0.05
+use_cleaned_mat <- TRUE # Since aliased, colinear, not checked overwrite each other making the mat legend difficult to understand 
 
 DATASET_NAME <- "Atom"
 EXPERIMENTS_DIR <- "/home/joern/.Datenplatte/Joerns Dateien/Aktuell/ABCPython/08AnalyseProgramme/R/ABC2way/"
@@ -34,9 +35,9 @@ EXPERIMENTS_DIR <- "/home/joern/.Datenplatte/Joerns Dateien/Aktuell/ABCPython/08
 FUNCTIONS_FILE_PATH <- "/home/joern/.Datenplatte/Joerns Dateien/Aktuell/ABCPython/08AnalyseProgramme/R/ABC2way/feature_selection_and_classification_functions.R"
 
 stimulus_types <- list(
-  "Mechanical"          = c("Pressure", "vonFrey", "vonFrey_Capsaicin", "Pressure2"),
-  "Thermal"             = c("Heat", "Heat_Capsaicin", "Cold", "Cold_Menthol"),
-  "Electrical"          = c("Current"),
+  "Mechanical" = c("Pressure", "vonFrey", "vonFrey_Capsaicin", "Pressure2"),
+  "Thermal" = c("Heat", "Heat_Capsaicin", "Cold", "Cold_Menthol"),
+  "Electrical" = c("Current"),
   "SensitizationEffect" = c("Capsaicin_Effect_Heat", "Menthol_Effect_Cold", "Capsaicin_Effect_vonFrey")
 )
 
@@ -59,16 +60,16 @@ prepared_data <- read.csv(PREPARED_DATA_FILE_PATH, row.names = 1)
 
 # Split into pain data (features) and target
 target_data <- prepared_data$Target
-pain_data   <- prepared_data[, !(colnames(prepared_data) %in% "Target")]
+pain_data <- prepared_data[, !(colnames(prepared_data) %in% "Target")]
 
 # --- VIF Candidates and Subset Preparation ---
-VIF_candidate_var_names <- c("Capsaicin_Effect_Heat", "Menthol_Effect_Cold", 
+VIF_candidate_var_names <- c("Capsaicin_Effect_Heat", "Menthol_Effect_Cold",
                              "Capsaicin_Effect_vonFrey", "Pressure2")
 
-subsets_to_remove <- lapply(1:length(VIF_candidate_var_names), function(n) 
-  combn(VIF_candidate_var_names, n, simplify=FALSE))
-subsets_to_remove <- unlist(subsets_to_remove, recursive=FALSE)
-subsets_to_remove <- append(subsets_to_remove, "")  # baseline with no vars removed
+subsets_to_remove <- lapply(1:length(VIF_candidate_var_names), function(n)
+  combn(VIF_candidate_var_names, n, simplify = FALSE))
+subsets_to_remove <- unlist(subsets_to_remove, recursive = FALSE)
+subsets_to_remove <- append(subsets_to_remove, "") # baseline with no vars removed
 
 df_orig_4_lr <- prepared_data
 
@@ -90,46 +91,46 @@ significant_vars_cleaned <- significant_vars_cleaned[!significant_vars_cleaned %
 
 # --- Extended VIF and Aliasing Analysis Including NA Results ---
 aliased <- lapply(seq_along(subsets_to_remove), function(i) {
-  
+
   aliased_vars <- c()
   colinear_vars <- c()
   colinear_not_checked <- c()
   wrong_result <- c()
   vars_in <- c()
-  
+
   df_orig_4_lr_i <- df_orig_4_lr[, !names(df_orig_4_lr) %in% subsets_to_remove[[i]]]
   vars_in <- setdiff(names(df_orig_4_lr_i), "Target")
-  
+
   lr_res_i <- glm(Target ~ ., data = df_orig_4_lr_i, family = binomial)
   print(summary(lr_res_i))
-  
+
   p_values <- summary(lr_res_i)$coefficients[, 4]
   significant_vars <- names(p_values)[p_values < significance_Level]
-  
+
   wrong_result <- unique(c(
     setdiff(significant_vars, significant_vars_cleaned),
     setdiff(significant_vars_cleaned, significant_vars)
   ))
-  
+
   aliased_check <- try(alias(lr_res_i)$Complete, silent = TRUE)
   if (!inherits(aliased_check, "try-error")) aliased_vars <- rownames(aliased_check)
-  
+
   if (!inherits(aliased_check, "try-error") && is.null(aliased_check)) {
     vif <- car::vif(lr_res_i)
     colinear_vars <- names(which(vif > VIF_LIMIT))
   } else {
     colinear_not_checked <- subsets_to_remove[[i]]
   }
-  
+
   # Capture the printed summary output as text lines
   summary_text <- capture.output(summary(lr_res_i))
-  
+
   # Locate the lines showing coefficients with NA (e.g the NA rows)
   na_lines <- grep("NA +NA +NA +NA", summary_text, value = TRUE)
-  
+
   # Extract variable names from those lines (assuming variable name is first word in line)
   NA_results <- as.vector(unlist(sapply(strsplit(na_lines, " "), function(x) x[1])))
-  
+
   list(
     colinear_vars = colinear_vars,
     colinear_not_checked = if (identical(colinear_not_checked, "")) NULL else colinear_not_checked,
@@ -139,7 +140,7 @@ aliased <- lapply(seq_along(subsets_to_remove), function(i) {
     vars_removed = if (identical(subsets_to_remove[[i]], "")) NULL else subsets_to_remove[[i]],
     NA_results = NA_results
   )
-  
+
 })
 
 ###############################################################################
@@ -151,61 +152,108 @@ all_vars <- colnames(pain_data)
 n_subsets <- length(aliased)
 
 mat <- matrix(0, nrow = n_subsets, ncol = length(all_vars))
-rownames(mat) <- sapply(subsets_to_remove, function(x) 
-  if(length(x) == 0) "All variables" else paste(x, collapse = "\n"))
+rownames(mat) <- sapply(subsets_to_remove, function(x)
+  if (length(x) == 0) "All variables" else paste(x, collapse = "\n"))
 colnames(mat) <- all_vars
 
 # Priority order for matrix values:
 # 6 = NA result, 5 = wrong result, 4 = aliased, 3 = colinear, 
 # 2 = colinear not checked, 1 = included & ok, 0 = removed
 
-for (i in seq_len(n_subsets)) {
-  print(i)
-  res <- aliased[[i]]
-  mat[i,res$vars_in] <- 1
-  mat[i,res$colinear_not_checked] <- 2
-  mat[i,res$colinear_vars] <- 3
-  mat[i,res$aliased_vars] <- 4
-  mat[i,res$wrong_result] <- 5
-  #mat[i,res$NA_results] <- 6
-  mat[i,res$vars_removed] <- 0
-}
 
 # --- Visualization Setup and Plotting ---
 
-column_group <- ifelse(colnames(mat) %in% VIF_candidate_var_names, "VIF_candidate", "Other")
-column_group <- factor(column_group, levels = c("VIF_candidate", "Other"))
+#Define colors 
 
-col_annotation_df <- data.frame(
+colorblind <- ggthemes::colorblind_pal()(8)
+
+# Create matrix from results 
+
+if (!use_cleaned_mat) {
+  for (i in seq_len(n_subsets)) {
+    print(i)
+    res <- aliased[[i]]
+    mat[i, res$vars_in] <- 1
+    mat[i, res$colinear_not_checked] <- 2
+    mat[i, res$colinear_vars] <- 3
+    mat[i, res$aliased_vars] <- 4
+    mat[i, res$wrong_result] <- 5
+    mat[i, res$NA_results] <- 6
+    mat[i, res$vars_removed] <- 0
+  }
+
+  my_colors <- c("ghostwhite", "lightskyblue1", colorblind[5], colorblind[2], "grey77", "rosybrown1", "grey50")
+  #my_colors <- ggthemes::colorblind_pal()(8)[2:8]
+  col_fun <- circlize::colorRamp2(
+    c(0, 1, 2, 3, 4, 5, 6), my_colors
+  )
+
+  column_group <- ifelse(colnames(mat) %in% VIF_candidate_var_names, "VIF_candidate", "Other")
+  column_group <- factor(column_group, levels = c("VIF_candidate", "Other"))
+
+  col_annotation_df <- data.frame(
   VIF_candidate = factor(ifelse(colnames(mat) %in% VIF_candidate_var_names, "yes", "no"),
                          levels = c("yes", "no"))
-)
-col_annot_colors <- list(VIF_candidate = c(yes = "forestgreen", no = "lightgray"))
-column_ha <- HeatmapAnnotation(
+  )
+  col_annot_colors <- list(VIF_candidate = c(yes = "forestgreen", no = "lightgray"))
+  column_ha <- HeatmapAnnotation(
   df = col_annotation_df,
   col = col_annot_colors,
   show_legend = FALSE,
   show_annotation_name = FALSE
-)
+  )
 
-colorblind <- ggthemes::colorblind_pal()(8)
-
-my_colors <- c("ghostwhite", "lightskyblue1", colorblind[5], colorblind[2], "grey77", "chartreuse3", "grey7")
-#my_colors <- ggthemes::colorblind_pal()(8)[2:8]
-col_fun <- circlize::colorRamp2(
-  c(0, 1, 2, 3, 4, 5, 6), my_colors
-)
-
-status_legend <- Legend(
+  status_legend <- Legend(
   labels = c("removed", "OK", "colinear not checked", "colinear", "aliased", "wrong results", "NA results"),
   title = "Variable status",
   legend_gp = gpar(fill = my_colors),
   direction = "horizontal"
-)
+  )
+} else {
+  for (i in seq_len(n_subsets)) {
+    print(i)
+    res <- aliased[[i]]
+    mat[i, res$vars_in] <- 1
+    mat[i, res$colinear_not_checked] <- 3
+    mat[i, res$colinear_vars] <- 3
+    mat[i, res$aliased_vars] <- 3
+    mat[i, res$wrong_result] <- 2
+    mat[i, res$NA_results] <- 3
+    mat[i, res$vars_removed] <- 0
+  }
 
+  my_colors <- c("ghostwhite", "lightskyblue1", "rosybrown1", "grey50")
+  #my_colors <- ggthemes::colorblind_pal()(8)[2:8]
+  col_fun <- circlize::colorRamp2(
+    c(0, 1, 2, 3), my_colors
+  )
+
+
+  column_group <- ifelse(colnames(mat) %in% VIF_candidate_var_names, "VIF_candidate", "Other")
+  column_group <- factor(column_group, levels = c("VIF_candidate", "Other"))
+
+  col_annotation_df <- data.frame(
+  VIF_candidate = factor(ifelse(colnames(mat) %in% VIF_candidate_var_names, "yes", "no"),
+                         levels = c("yes", "no"))
+  )
+  col_annot_colors <- list(VIF_candidate = c(yes = "forestgreen", no = "lightgray"))
+  column_ha <- HeatmapAnnotation(
+  df = col_annotation_df,
+  col = col_annot_colors,
+  show_legend = FALSE,
+  show_annotation_name = TRUE, annotation_name_side = "left"
+  )
+
+  status_legend <- Legend(
+  labels = c("removed", "OK", "wrong results", "NA results"),
+  title = "Variable status",
+  legend_gp = gpar(fill = my_colors),
+  direction = "horizontal"
+  )
+}
 create_clustered_heatmap <- function() {
   rownames(mat) <- gsub(",", "\n", rownames(mat))
-  
+
   ht <- Heatmap(
     mat,
     name = "Variable Status",
@@ -232,16 +280,16 @@ create_clustered_heatmap <- function() {
     cell_fun = NULL,
     show_heatmap_legend = FALSE
   )
-  
+
   grid.newpage()
   draw(ht)
-  
+
   grid::pushViewport(grid::viewport())
   draw(status_legend,
        x = unit(0, "npc") + unit(7, "mm"),
        y = unit(0, "npc") + unit(10, "mm"),
        just = c("left", "bottom"))
-  
+
   grid.text(
     "Variable status heatmap",
     x = unit(0, "npc") + unit(4, "mm"),
