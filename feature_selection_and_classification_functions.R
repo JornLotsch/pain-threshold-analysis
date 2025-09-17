@@ -7,17 +7,17 @@
 
 # --- Import Required Libraries ------------------------------------------------
 
-library(parallel)           # Enables parallel processing
-library(opdisDownsampling)  # Down/upsampling for balanced datasets
-library(randomForest)       # Random Forest ML algorithm
-library(caret)              # Comprehensive ML toolkit
-library(pbmcapply)          # Parallel map with progress bar
-library(Boruta)             # Wrapper for Boruta feature selector
-library(reshape2)           # Reshape data functions (e.g., 'melt')
-library(pROC)               # AUC/ROC analysis
-library(dplyr)              # Data wrangling
-library(glmnet)             # LASSO/logistic regression utilities
-library(car)                # Linear and generalized linear model diagnostic tools
+library(parallel) # Enables parallel processing
+library(opdisDownsampling) # Down/upsampling for balanced datasets
+library(randomForest) # Random Forest ML algorithm
+library(caret) # Comprehensive ML toolkit
+library(pbmcapply) # Parallel map with progress bar
+library(Boruta) # Wrapper for Boruta feature selector
+library(reshape2) # Reshape data functions (e.g., 'melt')
+library(pROC) # AUC/ROC analysis
+library(dplyr) # Data wrangling
+library(glmnet) # LASSO/logistic regression utilities
+library(car) # Linear and generalized linear model diagnostic tools
 
 ###############################################################################
 # Set working directory  ------------------------------------------
@@ -37,7 +37,7 @@ set_working_directory <- function(EXPERIMENTS_DIR = NULL) {
   }, error = function(e) {
     message("Unable to set working directory automatically: ", e$message)
   })
-  
+
   # If EXPERIMENTS_DIR is provided, try switching to it
   if (!is.null(EXPERIMENTS_DIR)) {
     if (dir.exists(EXPERIMENTS_DIR)) {
@@ -53,10 +53,10 @@ set_working_directory <- function(EXPERIMENTS_DIR = NULL) {
       cat("Continuing with current directory:", getwd(), "\n")
     }
   }
-  
+
   # Verify current working directory
   cat("Current working directory:", getwd(), "\n")
-  
+
   invisible(getwd()) # return the working dir without printing
 }
 
@@ -133,7 +133,7 @@ run_classifier_multiple_times <- function(train_data, train_target, test_data, t
   if (any(!is.finite(as.matrix(test_df_all)))) stop("Test data contains NA/NaN/Inf")
   ba_results <- numeric(n_runs)
   auc_results <- numeric(n_runs)
-  
+
   # Quick tune RF
   if (classifier_type == "RF" && tune_RF) {
     if (!mtry_12only) {
@@ -158,13 +158,13 @@ run_classifier_multiple_times <- function(train_data, train_target, test_data, t
           mtry = grid$mtry[i],
           ntree = grid$ntree[i]
         )
-        errors_matrix[i, run] <- mean(model$err.rate[, 1]) 
+        errors_matrix[i, run] <- mean(model$err.rate[, 1])
       }
     }
     grid$median_error <- apply(errors_matrix, 1, median)
     best <- grid[which.min(grid$median_error),]
-  } 
-  
+  }
+
   for (i in 1:n_runs) {
     tryCatch({
       set.seed(i)
@@ -190,7 +190,7 @@ run_classifier_multiple_times <- function(train_data, train_target, test_data, t
         test_target_factor <- as.factor(test_target)
       }
       levels(test_target_factor) <- levels(train_target_factor)
-      
+
       if (classifier_type == "RF") {
         if (length(levels(train_target_factor)) < 2) stop("Less than 2 classes in training data")
         if (tune_RF) {
@@ -213,7 +213,7 @@ run_classifier_multiple_times <- function(train_data, train_target, test_data, t
         }
         cm <- caret::confusionMatrix(pred, test_target_factor)
         ba_results[i] <- cm$byClass["Balanced Accuracy"]
-        
+
       } else if (classifier_type == "LR") {
         if (length(levels(train_target_factor)) < 2) stop("Less than 2 classes in training data")
         lr_train_data <- train_df
@@ -233,16 +233,16 @@ run_classifier_multiple_times <- function(train_data, train_target, test_data, t
         auc_results[i] <- as.numeric(roc_obj$auc)
         cm <- caret::confusionMatrix(pred, test_target_factor)
         ba_results[i] <- cm$byClass["Balanced Accuracy"]
-        
+
       } else if (classifier_type == "KNN") {
         knn_train_data <- train_df
         knn_train_data$target <- as.factor(train_target_factor)
         if (length(levels(knn_train_data$target)) < 2) stop("Less than 2 classes in training data")
         levels(knn_train_data$target) <- c("Class0", "Class1")
-        
+
         ctrl <- caret::trainControl(method = "cv", number = 5,
                                     classProbs = TRUE, summaryFunction = twoClassSummary)
-        
+
         # Suppress warnings temporarily just during caret::train
         model <- suppressWarnings(
           caret::train(
@@ -254,14 +254,14 @@ run_classifier_multiple_times <- function(train_data, train_target, test_data, t
             tuneLength = 5
           )
         )
-        
+
         pred <- predict(model, test_df)
         prob <- predict(model, test_df, type = "prob")
         levels(test_target_factor) <- c("Class0", "Class1")
-        
+
         roc_obj <- pROC::roc(as.numeric(test_target_factor), prob[, "Class1"], quiet = TRUE)
         auc_results[i] <- as.numeric(roc_obj$auc)
-        
+
         cm <- caret::confusionMatrix(pred, test_target_factor)
         ba_results[i] <- cm$byClass["Balanced Accuracy"]
       } else if (classifier_type == "C50") {
@@ -285,7 +285,7 @@ run_classifier_multiple_times <- function(train_data, train_target, test_data, t
         }
         cm <- caret::confusionMatrix(pred, test_target_factor)
         ba_results[i] <- cm$byClass["Balanced Accuracy"]
-        
+
       } else {
         stop("Unsupported classifier_type")
       }
@@ -295,7 +295,7 @@ run_classifier_multiple_times <- function(train_data, train_target, test_data, t
     })
     if (i %% 20 == 0) cat(".")
   }
-  
+
   valid_ba <- ba_results[!is.na(ba_results)]
   valid_auc <- auc_results[!is.na(auc_results)]
   if (length(valid_ba) < 10) {
@@ -309,7 +309,7 @@ run_classifier_multiple_times <- function(train_data, train_target, test_data, t
   ba_ci_upper <- stats::quantile(valid_ba, 0.975, na.rm = TRUE)
   auc_ci_lower <- stats::quantile(valid_auc, 0.025, na.rm = TRUE)
   auc_ci_upper <- stats::quantile(valid_auc, 0.975, na.rm = TRUE)
-  
+
   return(list(
     ba_mean = mean(valid_ba, na.rm = TRUE),
     ba_ci_lower = ba_ci_lower,
@@ -330,7 +330,7 @@ quick_classify_100_runs <- function(train_data, train_target, test_data, test_ta
     return(NULL)
   }
   results <- list()
-  
+
   # RF
   cat("Running Random Forest 100 times")
   rf_results <- run_classifier_multiple_times(train_data, train_target, test_data, test_target, "RF", 100)
@@ -343,7 +343,7 @@ quick_classify_100_runs <- function(train_data, train_target, test_data, test_ta
   } else {
     cat("RF - Failed to get valid results\n")
   }
-  
+
   # LR
   cat("Running Logistic Regression 100 times")
   lr_results <- run_classifier_multiple_times(train_data, train_target, test_data, test_target, "LR", 100)
@@ -356,7 +356,7 @@ quick_classify_100_runs <- function(train_data, train_target, test_data, test_ta
   } else {
     cat("LR - Failed to get valid results\n")
   }
-  
+
   # KNN
   cat("Running KNN 100 times")
   knn_results <- run_classifier_multiple_times(train_data, train_target, test_data, test_target, "KNN", 100)
@@ -369,7 +369,7 @@ quick_classify_100_runs <- function(train_data, train_target, test_data, test_ta
   } else {
     cat("KNN - Failed to get valid results\n")
   }
-  
+
   # C5.0
   cat("Running C5.0 100 times")
   c50_results <- run_classifier_multiple_times(train_data, train_target, test_data, test_target, "C50", 100)
@@ -382,7 +382,7 @@ quick_classify_100_runs <- function(train_data, train_target, test_data, test_ta
   } else {
     cat("C5.0 - Failed to get valid results\n")
   }
-  
+
   return(results)
 }
 
@@ -424,7 +424,7 @@ create_results_table <- function(test_results, datasets_to_test) {
         rf_ba_str <- "NA"
         if (use_roc_auc) rf_auc_str <- "NA" else rf_auc_str <- NULL
       }
-      
+
       lr_res <- test_results[[name]]$LR
       if (!is.na(lr_res$ba_mean)) {
         lr_ba_str <- sprintf("%.3f [%.3f, %.3f]", lr_res$ba_mean, lr_res$ba_ci_lower, lr_res$ba_ci_upper)
@@ -433,7 +433,7 @@ create_results_table <- function(test_results, datasets_to_test) {
         lr_ba_str <- "NA"
         if (use_roc_auc) lr_auc_str <- "NA" else lr_auc_str <- NULL
       }
-      
+
       knn_res <- test_results[[name]]$KNN
       if (!is.na(knn_res$ba_mean)) {
         knn_ba_str <- sprintf("%.3f [%.3f, %.3f]", knn_res$ba_mean, knn_res$ba_ci_lower, knn_res$ba_ci_upper)
@@ -442,7 +442,7 @@ create_results_table <- function(test_results, datasets_to_test) {
         knn_ba_str <- "NA"
         if (use_roc_auc) knn_auc_str <- "NA" else knn_auc_str <- NULL
       }
-      
+
       c50_res <- test_results[[name]]$C50
       if (!is.na(c50_res$ba_mean)) {
         c50_ba_str <- sprintf("%.3f [%.3f, %.3f]", c50_res$ba_mean, c50_res$ba_ci_lower, c50_res$ba_ci_upper)
@@ -451,7 +451,7 @@ create_results_table <- function(test_results, datasets_to_test) {
         c50_ba_str <- "NA"
         if (use_roc_auc) c50_auc_str <- "NA" else c50_auc_str <- NULL
       }
-      
+
       if (use_roc_auc) {
         success_flag <- any(
           rf_res$ba_ci_lower > 0.5, rf_res$auc_ci_lower > 0.5,
@@ -584,7 +584,7 @@ run_LASSO <- function(x, y) {
 # Prepare LASSO output for barplotting
 prepare_lasso_plot_data <- function(lasso_res, feature_names) {
   if (is.null(lasso_res)) return(NULL)
-  
+
   lasso_coef <- coef(lasso_res$model, s = "lambda.min")
   coef_df <- data.frame(
     Feature = rownames(lasso_coef)[-1],
@@ -634,7 +634,7 @@ plot_lasso <- function(plot_data, title) {
     ) +
     scale_fill_manual(
       values = c("Selected" = "chartreuse4", "Rejected" = "salmon")
-    ) 
+    )
 }
 
 ###############################################################################
@@ -643,36 +643,36 @@ plot_lasso <- function(plot_data, title) {
 
 # Function to run single logistic regression and print summary
 run_single_logistic_regression <- function(train_data, train_target, dataset_name) {
-  
+
   cat(sprintf("\n=== %s - Logistic Regression Summary ===\n", dataset_name))
   cat(sprintf("Dataset: %d features, %d samples\n", ncol(train_data), nrow(train_data)))
-  
+
   # Skip if no data
   if (ncol(train_data) == 0 || nrow(train_data) == 0) {
     cat("No data available - skipping\n")
     return(NULL)
   }
-  
+
   tryCatch({
     # Prepare data for logistic regression
     lr_train_data <- train_data
     lr_train_data$target <- as.factor(train_target)
-    
+
     # Create formula
     if (ncol(train_data) == 1) {
       formula_str <- paste("target ~", names(train_data)[1])
     } else {
       formula_str <- "target ~ ."
     }
-    
+
     # Fit logistic regression model
     model <- glm(as.formula(formula_str), data = lr_train_data, family = binomial)
-    
+
     # Print model summary
     print(summary(model))
-    
+
     return(model)
-    
+
   }, error = function(e) {
     cat("Error fitting logistic regression:", e$message, "\n")
     return(NULL)
@@ -704,21 +704,21 @@ calculate_cohens_d_with_ttest <- function(data, target, dataset_name) {
     Dataset = character(),
     stringsAsFactors = FALSE
   )
-  
+
   target_factor <- as.factor(target)
-  
+
   for (var in names(data)) {
     tryCatch({
       # Split data by target groups
       group1 <- data[target_factor == levels(target_factor)[1], var]
       group2 <- data[target_factor == levels(target_factor)[2], var]
-      
+
       # Calculate Cohen's d with confidence interval
       cohens_result <- cohen.d(group1, group2, conf.level = 0.95)
-      
+
       # Perform t-test
       ttest_result <- t.test(group1, group2)
-      
+
       results <- rbind(results, data.frame(
         Variable = var,
         Cohens_d = cohens_result$estimate,
@@ -733,7 +733,7 @@ calculate_cohens_d_with_ttest <- function(data, target, dataset_name) {
       cat(sprintf("Error calculating Cohen's d for variable %s in %s: %s\n", var, dataset_name, e$message))
     })
   }
-  
+
   return(results)
 }
 
@@ -746,43 +746,43 @@ plot_cohens_d <- function(cohens_d_list, dataset_names = NULL) {
   if (!is.null(dataset_names) && length(dataset_names) != length(cohens_d_list)) {
     stop("Length of dataset_names must be same as length of cohens_d_list or NULL.")
   }
-  
+
   # Assign dataset labels to each data frame
   labeled_list <- Map(function(df, name) {
     df$Dataset <- if (is.null(name)) unique(df$Dataset)[1] else name
     df
   }, cohens_d_list, if (is.null(dataset_names)) rep(NA, length(cohens_d_list)) else dataset_names)
-  
+
   # Combine all Cohen's d data frames
   all_cohens_d <- dplyr::bind_rows(labeled_list)
-  
+
   # Add significance labels and position info
   all_cohens_d <- all_cohens_d %>%
     dplyr::mutate(
       p_label = dplyr::case_when(
         p_value < 0.001 ~ "***",
-        p_value < 0.01  ~ "**",
-        p_value < 0.05  ~ "*",
-        p_value < 0.1   ~ ".",
-        TRUE            ~ ""
+        p_value < 0.01 ~ "**",
+        p_value < 0.05 ~ "*",
+        p_value < 0.1 ~ ".",
+        TRUE ~ ""
       ),
       t_label = sprintf("t=%.2f%s", t_statistic, p_label),
       text_y_position = ifelse(Cohens_d >= 0, CI_upper + 0.1, CI_lower - 0.1),
       text_hjust = ifelse(Cohens_d >= 0, 0, 1)
     )
-  
+
   # Use original ordering from first dataset's effect sizes (absolute)
   variable_order <- cohens_d_list[[1]] %>%
     dplyr::arrange(dplyr::desc(abs(Cohens_d))) %>%
     dplyr::pull(Variable)
-  
+
   all_cohens_d$Variable <- factor(all_cohens_d$Variable, levels = rev(variable_order))
-  
+
   # Define fill colors, accommodating dynamic dataset names
   unique_datasets <- unique(all_cohens_d$Dataset)
   palette <- c("dodgerblue", "chartreuse3", "orangered", "goldenrod", "purple", "cyan", "magenta", "gray40")
   fill_colors <- setNames(palette[seq_along(unique_datasets)], unique_datasets)
-  
+
   # Build plot
   cohens_d_plot <- ggplot(all_cohens_d, aes(x = reorder(Variable, abs(Cohens_d)),
                                             y = Cohens_d,
@@ -809,11 +809,11 @@ plot_cohens_d <- function(cohens_d_list, dataset_names = NULL) {
          y = "Cohen's d",
          caption = "Dashed lines represent standard effect size thresholds (0.2, 0.5, 0.8).") +
     theme_minimal(base_family = "sans")
-  
+
   if (use_nyt) {
     cohens_d_plot <- cohens_d_plot + nyt_theme()
   }
-  
+
   return(list(plot = cohens_d_plot, combined_data = all_cohens_d))
 }
 
@@ -825,32 +825,32 @@ run_analysis_pipeline <- function(processed_data = NULL, use_curated_subset = FA
                                   curated_names = NULL, add_file_string = "",
                                   training_data_actual = NULL, training_target = NULL,
                                   validation_data_actual = NULL, validation_target = NULL) {
-  
+
   # Check if pre-split data is provided
   if (!is.null(training_data_actual) && !is.null(training_target) &&
       !is.null(validation_data_actual) && !is.null(validation_target)) {
-    
+
     # Use pre-split data
     cat("Using pre-split training/validation data...\n")
-    
+
     # Apply curated subset if requested to pre-split data
     if (use_curated_subset && !is.null(curated_names)) {
       available_curated_train <- intersect(curated_names, names(training_data_actual))
       available_curated_valid <- intersect(curated_names, names(validation_data_actual))
-      
+
       if (length(available_curated_train) > 0 && length(available_curated_valid) > 0) {
         training_data_actual <- training_data_actual[, available_curated_train, drop = FALSE]
         validation_data_actual <- validation_data_actual[, available_curated_valid, drop = FALSE]
         cat("Applied curated subset to pre-split data:", paste(names(training_data_actual), collapse = ", "), "\n")
       }
     }
-    
+
   } else if (!is.null(processed_data)) {
-    
+
     # Use full dataset and perform splitting
     data <- processed_data$data
     target <- processed_data$target
-    
+
     # Apply curated subset if requested
     if (use_curated_subset && !is.null(curated_names)) {
       available_curated <- intersect(curated_names, names(data))
@@ -859,75 +859,75 @@ run_analysis_pipeline <- function(processed_data = NULL, use_curated_subset = FA
         cat("Using curated subset:", paste(names(data), collapse = ", "), "\n")
       }
     }
-    
+
     # Split into training/validation sets
     cat("Splitting data into training/validation sets...\n")
     data_split <- opdisDownsampling::opdisDownsampling(
       data, Cls = target, Size = 0.8, Seed = SEED, nTrials = 2000000,
       MaxCores = parallel::detectCores() - 1
     )
-    
+
     training_data_actual <- data_split$ReducedData[, 1:(ncol(data_split$ReducedData) - 1)]
     training_target <- data_split$ReducedData$Cls
-    
+
     validation_data_actual <- data_split$RemovedData[, 1:(ncol(data_split$RemovedData) - 1)]
     validation_target <- data_split$RemovedData$Cls
-    
+
   } else {
     stop("Either 'processed_data' or all four split parameters (training_data_actual, training_target, validation_data_actual, validation_target) must be provided")
   }
-  
+
   cat("=== Classification Analysis with 100 Runs CI ===\n")
   cat("Training data:", nrow(training_data_actual), "rows,", ncol(training_data_actual), "features\n")
   cat("Validation data:", nrow(validation_data_actual), "rows,", ncol(validation_data_actual), "features\n")
-  
+
   # Run Boruta feature selection
   cat("\nRunning Boruta feature selection...\n")
   set.seed(SEED)
   boruta_actual <- run_boruta(x = training_data_actual, y = as.factor(training_target))
-  
+
   # Create and save Boruta plot
   cat("Creating Boruta visualization plot...\n")
   boruta_plot_data <- prepare_boruta_plot_data(boruta_actual)
   boruta_plot <- plot_boruta(boruta_plot_data, "Boruta Feature Importance - Training Data")
   if (use_nyt) boruta_plot <- boruta_plot + nyt_theme() +
     theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
-  
+
   boruta_decisions <- boruta_actual$finalDecision
   boruta_res <- get_boruta_features(boruta_decisions, Boruta_tentative_in)
-  
+
   boruta_selected <- boruta_res$selected
   boruta_rejected <- boruta_res$rejected
-  
-  
+
+
   # # Handle case where no features are selected by Boruta
   # if (length(boruta_selected) == 0) {
   #   cat("Warning: Boruta selected NO features! Using all features as backup.\n")
   #   boruta_selected <- names(training_data_actual)
   #   boruta_rejected <- character(0)
   # }
-  
+
   cat("Boruta selected features:", length(boruta_selected), "\n")
   cat("Selected:", paste(boruta_selected, collapse = ", "), "\n")
   cat("Boruta rejected features:", length(boruta_rejected), "\n")
   cat("Rejected:", paste(boruta_rejected, collapse = ", "), "\n")
-  
+
   # Run LASSO feature selection
   cat("\nRunning LASSO feature selection...\n")
   set.seed(SEED)
   lasso_actual <- run_LASSO(x = training_data_actual, y = as.factor(training_target))
-  
+
   # Create and save LASSO plot
   lasso_plot_data <- prepare_lasso_plot_data(lasso_actual, names(training_data_actual))
   lasso_plot <- plot_lasso(lasso_plot_data, "LASSO Feature Selection - Training Data")
   if (use_nyt) lasso_plot <- lasso_plot + nyt_theme() +
     theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
-  
+
   # Get LASSO selected and rejected features
   if (!is.null(lasso_actual)) {
     lasso_selected <- lasso_actual$selected
     lasso_rejected <- setdiff(names(training_data_actual), lasso_selected)
-    
+
     # if (length(lasso_selected) == 0) {
     #   cat("Warning: LASSO selected NO features! Using all features as backup.\n")
     #   lasso_selected <- names(training_data_actual)
@@ -938,29 +938,29 @@ run_analysis_pipeline <- function(processed_data = NULL, use_curated_subset = FA
     lasso_selected <- names(training_data_actual)
     lasso_rejected <- character(0)
   }
-  
+
   cat("LASSO selected features:", length(lasso_selected), "\n")
   cat("Selected:", paste(lasso_selected, collapse = ", "), "\n")
   cat("LASSO rejected features:", length(lasso_rejected), "\n")
   cat("Rejected:", paste(lasso_rejected, collapse = ", "), "\n")
-  
+
   # Create feature selection matrix plot
   cat("\nCreating feature selection matrix plot...\n")
   all_features <- names(training_data_actual)
-  
+
   selection_matrix <- data.frame(
-    Feature        = all_features,
+    Feature = all_features,
     Boruta_Selected = as.integer(all_features %in% boruta_res$selected),
-    LASSO_Selected  = as.integer(all_features %in% lasso_plot_data$Feature[lasso_plot_data$Decision != "Rejected"]),
+    LASSO_Selected = as.integer(all_features %in% lasso_plot_data$Feature[lasso_plot_data$Decision != "Rejected"]),
     stringsAsFactors = FALSE
   )
-  
+
   selection_matrix$Selection_Category <- with(selection_matrix, {
     ifelse(Boruta_Selected == 1 & LASSO_Selected == 1, "Both",
            ifelse(Boruta_Selected == 1 & LASSO_Selected == 0, "Boruta only",
                   ifelse(Boruta_Selected == 0 & LASSO_Selected == 1, "LASSO only", "Neither")))
   })
-  
+
   # Convert to long format for plotting
   selection_long <- selection_matrix %>%
     select(Feature, Boruta_Selected, LASSO_Selected) %>%
@@ -968,7 +968,7 @@ run_analysis_pipeline <- function(processed_data = NULL, use_curated_subset = FA
                  names_to = "Method",
                  values_to = "Selected") %>%
     mutate(Method = gsub("_Selected", "", Method))
-  
+
   # Create matrix heatmap
   matrix_plot <- ggplot(selection_long, aes(x = Method, y = Feature, fill = factor(Selected))) +
     geom_tile(color = "white", linewidth = 0.5, alpha = .7) +
@@ -991,13 +991,13 @@ run_analysis_pipeline <- function(processed_data = NULL, use_curated_subset = FA
       y = "Features"
     )
   if (use_nyt) matrix_plot <- matrix_plot + nyt_theme()
-  
+
   # Create summary bar plot
   summary_data <- selection_matrix %>%
     count(Selection_Category) %>%
     mutate(Selection_Category = factor(Selection_Category,
                                        levels = c("Both", "Boruta only", "LASSO only", "Neither")))
-  
+
   summary_plot <- ggplot(summary_data, aes(x = Selection_Category, y = n, fill = Selection_Category)) +
     geom_bar(stat = "identity", alpha = 0.8) +
     geom_text(aes(label = n), vjust = 0.3, size = 4) +
@@ -1006,7 +1006,7 @@ run_analysis_pipeline <- function(processed_data = NULL, use_curated_subset = FA
                  "LASSO only" = "#E69F00", "Neither" = "salmon")
     ) +
     scale_y_continuous(expand = expansion(mult = c(0, 0.1))) + # Add 10% space at top
-    theme_light() +
+  theme_light() +
     theme(
       plot.title = element_text(size = 14, hjust = 0.5),
       legend.position = "none",
@@ -1018,13 +1018,13 @@ run_analysis_pipeline <- function(processed_data = NULL, use_curated_subset = FA
       y = "Number of features"
     )
   if (use_nyt) summary_plot <- summary_plot + nyt_theme() + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
-  
+
   # Run classification experiments
   cat("\nRunning classification experiments...\n")
-  
+
   # Attempt to get highly correlated vars to drop; handle errors if cor() fails
-  high_corr_vars <- character(0)  # default empty
-  
+  high_corr_vars <- character(0) # default empty
+
   try({
     res <- find_variables_to_drop_caret(
       data = training_data_actual,
@@ -1035,64 +1035,64 @@ run_analysis_pipeline <- function(processed_data = NULL, use_curated_subset = FA
       high_corr_vars <- res$vars_to_drop
     }
   }, silent = TRUE)
-  
+
   # Build datasets_to_test list
   datasets_to_test <- list(
     "All_Features" = list(
       train = training_data_actual,
-      test  = validation_data_actual
+      test = validation_data_actual
     ),
     "Boruta_Selected" = list(
       train = if (length(boruta_selected) > 0) training_data_actual[, boruta_selected, drop = FALSE] else data.frame(),
-      test  = if (length(boruta_selected) > 0) validation_data_actual[, boruta_selected, drop = FALSE] else data.frame()
+      test = if (length(boruta_selected) > 0) validation_data_actual[, boruta_selected, drop = FALSE] else data.frame()
     ),
     "Boruta_Rejected" = list(
       train = if (length(boruta_rejected) > 0) training_data_actual[, boruta_rejected, drop = FALSE] else data.frame(),
-      test  = if (length(boruta_rejected) > 0) validation_data_actual[, boruta_rejected, drop = FALSE] else data.frame()
+      test = if (length(boruta_rejected) > 0) validation_data_actual[, boruta_rejected, drop = FALSE] else data.frame()
     ),
     "LASSO_Selected" = list(
       train = if (length(lasso_selected) > 0) training_data_actual[, lasso_selected, drop = FALSE] else data.frame(),
-      test  = if (length(lasso_selected) > 0) validation_data_actual[, lasso_selected, drop = FALSE] else data.frame()
+      test = if (length(lasso_selected) > 0) validation_data_actual[, lasso_selected, drop = FALSE] else data.frame()
     ),
     "LASSO_Rejected" = list(
       train = if (length(lasso_rejected) > 0) training_data_actual[, lasso_rejected, drop = FALSE] else data.frame(),
-      test  = if (length(lasso_rejected) > 0) validation_data_actual[, lasso_rejected, drop = FALSE] else data.frame()
+      test = if (length(lasso_rejected) > 0) validation_data_actual[, lasso_rejected, drop = FALSE] else data.frame()
     ),
     "Boruta_LASSO_Selected" = list(
-      train = if ((length(boruta_selected) + length(lasso_selected)) > 0) 
+      train = if ((length(boruta_selected) + length(lasso_selected)) > 0)
         training_data_actual[, union(boruta_selected, lasso_selected), drop = FALSE] else data.frame(),
-      test  = if ((length(boruta_selected) + length(lasso_selected)) > 0) 
+      test = if ((length(boruta_selected) + length(lasso_selected)) > 0)
         validation_data_actual[, union(boruta_selected, lasso_selected), drop = FALSE] else data.frame()
     ),
     "Boruta_LASSO_Rejected" = list(
-      train = if ((length(boruta_rejected) + length(lasso_rejected)) > 0)  
+      train = if ((length(boruta_rejected) + length(lasso_rejected)) > 0)
         training_data_actual[, setdiff(names(training_data_actual), union(boruta_selected, lasso_selected)), drop = FALSE] else data.frame(),
-      test  = if ((length(boruta_rejected) + length(lasso_rejected)) > 0)
+      test = if ((length(boruta_rejected) + length(lasso_rejected)) > 0)
         validation_data_actual[, setdiff(names(training_data_actual), union(boruta_selected, lasso_selected)), drop = FALSE] else data.frame()
     ),
     "Only_high_correlated" = list(
       train = if (length(high_corr_vars) > 0) training_data_actual[, high_corr_vars, drop = FALSE] else data.frame(),
-      test  = if (length(high_corr_vars) > 0) validation_data_actual[, high_corr_vars, drop = FALSE] else data.frame()
+      test = if (length(high_corr_vars) > 0) validation_data_actual[, high_corr_vars, drop = FALSE] else data.frame()
     )
   )
-  
-  
+
+
   # Run classification tests
   test_results <- list()
   for (dataset_name in names(datasets_to_test)) {
     dataset <- datasets_to_test[[dataset_name]]
     test_results[[dataset_name]] <- quick_classify_100_runs(
-      train_data =  dataset$train, train_target = training_target, test_data = dataset$test, test_target = validation_target, dataset_name = dataset_name
+      train_data = dataset$train, train_target = training_target, test_data = dataset$test, test_target = validation_target, dataset_name = dataset_name
     )
   }
-  
+
   # Create and display results table
   if (length(test_results) > 0) {
     cat("\n=== RESULTS SUMMARY ===\n")
     results_table <- create_results_table(test_results, datasets_to_test)
     print(results_table)
   }
-  
+
   # Return results for further analysis if needed
   return(list(
     boruta_results = boruta_actual,
@@ -1105,7 +1105,7 @@ run_analysis_pipeline <- function(processed_data = NULL, use_curated_subset = FA
       lasso = lasso_plot,
       matrix = matrix_plot,
       summary = summary_plot
-      
+
     )
   ))
 }
@@ -1116,46 +1116,46 @@ run_analysis_pipeline <- function(processed_data = NULL, use_curated_subset = FA
 
 run_feature_selection_iterations <- function() {
   all_results_feature_selection <- list()
-  
+
   # --- Run analysis on full dataset ---
   full_results <- run_analysis_pipeline(
-    training_data_actual   = training_data_original,
-    training_target        = training_target,
+    training_data_actual = training_data_original,
+    training_target = training_target,
     validation_data_actual = validation_data_original,
-    validation_target      = validation_target,
-    use_curated_subset     = FALSE,
-    curated_names          = NULL,
-    add_file_string        = "_full"
+    validation_target = validation_target,
+    use_curated_subset = FALSE,
+    curated_names = NULL,
+    add_file_string = "_full"
   )
   all_results_feature_selection[["Full dataset"]] <- full_results
   if (!is.null(full_results$plots$matrix)) print(full_results$plots$matrix)
-  
-  boruta_res     <- get_boruta_features(full_results$boruta_results$finalDecision, Boruta_tentative_in)
+
+  boruta_res <- get_boruta_features(full_results$boruta_results$finalDecision, Boruta_tentative_in)
   boruta_selected <- boruta_res$selected
-  lasso_selected  <- full_results$lasso_results$selected
+  lasso_selected <- full_results$lasso_results$selected
   available_features <- names(training_data_original)
-  curated_features   <- setdiff(available_features, union(boruta_selected, lasso_selected))
-  
+  curated_features <- setdiff(available_features, union(boruta_selected, lasso_selected))
+
   results_table_full <- full_results$results_table
   rejected_indices_full <- which(grepl("rejected", results_table_full$Dataset, ignore.case = TRUE))
-  continue_iteration_after_full <- any(results_table_full[rejected_indices_full,"Classification_Success"] == 1)
-  
+  continue_iteration_after_full <- any(results_table_full[rejected_indices_full, "Classification_Success"] == 1)
+
   all_curated_results <- list()
   iteration <- 0
-  
+
   if (continue_iteration_after_full) {
     classification_success_values <- c(1)
     while (length(curated_features) > 0 && any(classification_success_values != 0) && iteration < max_iterations) {
       iteration <- iteration + 1
       cat(sprintf("Iteration %d: running curated subset with %d features\n", iteration, length(curated_features)))
       curated_results <- run_analysis_pipeline(
-        training_data_actual   = training_data_original,
-        training_target        = training_target,
+        training_data_actual = training_data_original,
+        training_target = training_target,
         validation_data_actual = validation_data_original,
-        validation_target      = validation_target,
-        use_curated_subset     = TRUE,
-        curated_names          = curated_features,
-        add_file_string        = paste0("_curated_iter", iteration)
+        validation_target = validation_target,
+        use_curated_subset = TRUE,
+        curated_names = curated_features,
+        add_file_string = paste0("_curated_iter", iteration)
       )
       all_curated_results[[paste0("Iter_", iteration)]] <- curated_results
       if (!is.null(curated_results$plots$matrix)) print(curated_results$plots$matrix)
@@ -1163,9 +1163,9 @@ run_feature_selection_iterations <- function() {
       rejected_indices <- grepl("rejected", results_table$Dataset, ignore.case = TRUE)
       continue_iteration <- any(results_table$Classification_Success[rejected_indices] == 1)
       if (continue_iteration) {
-        boruta_res    <- get_boruta_features(curated_results$boruta_results$finalDecision, Boruta_tentative_in)
+        boruta_res <- get_boruta_features(curated_results$boruta_results$finalDecision, Boruta_tentative_in)
         boruta_selected <- boruta_res$selected
-        lasso_selected  <- curated_results$lasso_results$selected
+        lasso_selected <- curated_results$lasso_results$selected
         curated_features <- setdiff(curated_features, union(boruta_selected, lasso_selected))
         classification_success_values <- results_table$Classification_Success
       } else {
@@ -1174,14 +1174,14 @@ run_feature_selection_iterations <- function() {
       }
     }
   }
-  
+
   if (RUN_ONE_ADDITIONAL_ITERATION) {
     # Run last iteration manually after the loop if desired
     boruta_res <- get_boruta_features(curated_results$boruta_results$finalDecision, Boruta_tentative_in)
     boruta_selected <- boruta_res$selected
     lasso_selected <- curated_results$lasso_results$selected
     curated_features <- setdiff(curated_features, union(boruta_selected, lasso_selected))
-    
+
     if (!(length(curated_features) > 0 && any(classification_success_values != 0) && iteration < max_iterations)) {
       iteration <- iteration + 1
       cat(sprintf("Final iteration %d: running curated subset with %d features\n", iteration, length(curated_features)))
@@ -1198,14 +1198,14 @@ run_feature_selection_iterations <- function() {
       print(curated_results$plots$matrix)
     }
   }
-  
-  
+
+
   # Combine all results
   full_results_table <- all_results_feature_selection[["Full dataset"]]$results_table
   full_results_table$Iteration <- "Full dataset"
   combined_results_table <- full_results_table
   if (length(all_curated_results) > 0) {
-    for(iter_name in names(all_curated_results)) {
+    for (iter_name in names(all_curated_results)) {
       iter_table <- all_curated_results[[iter_name]]$results_table
       iter_table$Iteration <- iter_name
       combined_results_table <- rbind(combined_results_table, iter_table)

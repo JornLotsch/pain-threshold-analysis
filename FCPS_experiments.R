@@ -41,8 +41,8 @@ set_working_directory(EXPERIMENTS_DIR)
 
 FCPS_df_original <- data.frame(Target = as.factor(FCPS::Atom$Cls), FCPS::Atom$Data)
 ds_result <- opdisDownsampling::opdisDownsampling(
-  Data = FCPS_df_original[,-1], 
-  Cls = FCPS_df_original$Target, 
+  Data = FCPS_df_original[, -1],
+  Cls = FCPS_df_original$Target,
   Size = 0.8, Seed = SEED, nTrials = 2000000, MaxCores = parallel::detectCores() - 1
 )
 
@@ -57,9 +57,9 @@ valid$Cls <- as.factor(valid$Cls)
 
 # Create 3D scatter plot with margins and perspective -------------------
 # Extract first 3 numeric features; adjust if needed
-x <- FCPS_df_original[,2]
-y <- FCPS_df_original[,3]
-z <- FCPS_df_original[,4]
+x <- FCPS_df_original[, 2]
+y <- FCPS_df_original[, 3]
+z <- FCPS_df_original[, 4]
 classes <- FCPS_df_original$Target
 
 # Add 10% padding to axis ranges for margins
@@ -80,7 +80,7 @@ camera_view <- list(eye = list(x = 1.5, y = 1.5, z = 1.0))
 p <- plot_ly(
   x = ~x, y = ~y, z = ~z,
   color = ~classes,
-  colors = c("#1f77b4", "#ff7f0e", "#2ca02c"),  # adjust colors based on classes
+  colors = c("#1f77b4", "#ff7f0e", "#2ca02c"), # adjust colors based on classes
   type = 'scatter3d',
   mode = 'markers',
   marker = list(size = 5)
@@ -133,7 +133,7 @@ flatten_byClass <- function(byClass, class_levels) {
     # multi-class: flatten matrix prefixing class labels
     flattened <- c()
     for (cls in rownames(byClass)) {
-      cls_metrics <- byClass[cls, ]
+      cls_metrics <- byClass[cls,]
       names(cls_metrics) <- paste0(cls, "_", names(cls_metrics))
       flattened <- c(flattened, cls_metrics)
     }
@@ -142,7 +142,7 @@ flatten_byClass <- function(byClass, class_levels) {
 }
 
 # Quick tune RF
-mtry_values <- c(1,2) 
+mtry_values <- c(1, 2)
 ntree_values <- c(500, 1000)
 
 results <- expand.grid(mtry = mtry_values, ntree = ntree_values)
@@ -165,21 +165,21 @@ run_one_iteration <- function(train_df, valid_df, seed) {
   # train Logistic Regression
   set.seed(seed)
   lr_model <- glm(Cls ~ ., data = train_df, family = binomial)
-  
+
   # train Random Forest
   set.seed(seed)
   rf_model <- randomForest::randomForest(Cls ~ ., data = train_df, mtry = best$mtry, ntree = best$ntree)
-  
+
   # train KNN using caret (with preprocessing)
   # Ensure levels are valid_df factor names
   set.seed(seed)
   train_knn <- train_df
   train_knn$Cls <- as.factor(train_knn$Cls)
-  levels(train_knn$Cls) <- c("Class0", "Class1")  # adjust if classes differ
-  
+  levels(train_knn$Cls) <- c("Class0", "Class1") # adjust if classes differ
+
   ctrl <- caret::trainControl(method = "cv", number = 5,
                               classProbs = TRUE, summaryFunction = twoClassSummary)
-  
+
   set.seed(seed)
   knn_model <- caret::train(
     Cls ~ ., data = train_knn,
@@ -189,55 +189,55 @@ run_one_iteration <- function(train_df, valid_df, seed) {
     preProcess = c("center", "scale"),
     tuneLength = 5
   )
-  
+
   # train C5.0
   set.seed(seed)
   c50_model <- C50::C5.0(Cls ~ ., data = train_df)
-  
+
   # Predict with all models on validation set (valid_df)
   # For LR (binary probability)
   lr_prob <- predict(lr_model, valid_df, type = "response")
   class_levels <- levels(FCPS_df_original$Target)
-  
+
   if (length(class_levels) == 2) {
     lr_pred <- factor(ifelse(lr_prob > 0.5, class_levels[2], class_levels[1]), levels = class_levels)
   } else {
     lr_pred <- factor(class_levels[1], levels = class_levels)
   }
-  
+
   rf_pred <- predict(rf_model, valid_df)
-  
+
   # For KNN: rename valid_df$Cls factor to match KNN train_df levels
   valid_knn <- valid_df
   valid_knn$Cls <- as.factor(valid_knn$Cls)
   levels(valid_knn$Cls) <- c("Class0", "Class1")
-  
+
   knn_pred <- predict(knn_model, valid_knn)
-  
+
   c50_pred <- predict(c50_model, valid_df)
-  
+
   # Confusion matrices
   cm_lr <- caret::confusionMatrix(factor(valid_df$Cls, levels = class_levels), lr_pred, mode = "everything")
   cm_rf <- caret::confusionMatrix(factor(valid_df$Cls, levels = class_levels), rf_pred, mode = "everything")
   cm_knn <- caret::confusionMatrix(valid_knn$Cls, knn_pred, mode = "everything")
   cm_c50 <- caret::confusionMatrix(valid_df$Cls, c50_pred, mode = "everything")
-  
+
   # Flatten 'byClass' stats helper function assumed present
   byClass_lr <- flatten_byClass(cm_lr$byClass, class_levels)
   byClass_rf <- flatten_byClass(cm_rf$byClass, class_levels)
   byClass_knn <- flatten_byClass(cm_knn$byClass, levels(valid_knn$Cls))
   byClass_c50 <- flatten_byClass(cm_c50$byClass, class_levels)
-  
+
   overall_lr <- cm_lr$overall[c("Accuracy", "Kappa")]
   overall_rf <- cm_rf$overall[c("Accuracy", "Kappa")]
   overall_knn <- cm_knn$overall[c("Accuracy", "Kappa")]
   overall_c50 <- cm_c50$overall[c("Accuracy", "Kappa")]
-  
+
   lr_stats <- c(overall_lr, byClass_lr)
   rf_stats <- c(overall_rf, byClass_rf)
   knn_stats <- c(overall_knn, byClass_knn)
   c50_stats <- c(overall_c50, byClass_knn)
-  
+
   list(Logistic = lr_stats, RandomForest = rf_stats, KNN = knn_stats, C50 = c50_stats)
 }
 
@@ -245,7 +245,7 @@ run_one_iteration <- function(train_df, valid_df, seed) {
 # Run 100 iterations in parallel -----------------------------------------
 n_runs <- 100
 set.seed(SEED)
-seeds <- SEED:(SEED+n_runs)   
+seeds <- SEED:(SEED + n_runs)
 
 results_list <- pbmcapply::pbmclapply(seeds, function(seed) {
   set.seed(seed)
@@ -266,10 +266,10 @@ results_list <- pbmcapply::pbmclapply(seeds, function(seed) {
     train_df <- train
     valid_df <- valid
   }
-  
+
   run_one_iteration(train_df, valid_df, seed)
-  
-} , mc.cores = parallel::detectCores()-1)
+
+}, mc.cores = parallel::detectCores() - 1)
 
 # Convert list results into data frames ----------------------------------
 extract_df <- function(results, model_name) {
@@ -282,8 +282,8 @@ extract_df <- function(results, model_name) {
 
 df_lr <- extract_df(results_list, "Logistic")
 df_rf <- extract_df(results_list, "RandomForest")
-df_knn <- extract_df(results_list, "KNN")  
-df_c50 <- extract_df(results_list, "C50")  
+df_knn <- extract_df(results_list, "KNN")
+df_c50 <- extract_df(results_list, "C50")
 
 # Compute summary statistics (median, 2.5th and 97.5th percentiles) ------
 summary_stats <- function(df) {
@@ -297,8 +297,8 @@ summary_stats <- function(df) {
 
 summary_lr <- summary_stats(df_lr)
 summary_rf <- summary_stats(df_rf)
-summary_knn <- summary_stats(df_knn)   
-summary_c50 <- summary_stats(df_c50)   
+summary_knn <- summary_stats(df_knn)
+summary_c50 <- summary_stats(df_c50)
 
 ###############################################################################
 # Show all results and write them to a text file 
@@ -307,18 +307,18 @@ summary_c50 <- summary_stats(df_c50)
 # View summarized statistics
 for (i in 1:2) {
   if (i == 2) sink(paste0(DATASET_NAME, "_lr_and_ml_output", ".txt"))
-  
+
   cat("\n\nLR ML summary\n")
   print(summary_lr)
   cat("\n\nRF ML summary\n")
   print(summary_rf)
   cat("\n\nKNN ML summary\n")
-  print(summary_knn)    
+  print(summary_knn)
   cat("\n\nC5.0 ML summary\n")
   print(summary_c50)
   cat("\n\nLogistic regression summary\n")
   print(summary(model_lr_orig))
-  
+
   if (i == 2) sink()
 }
 

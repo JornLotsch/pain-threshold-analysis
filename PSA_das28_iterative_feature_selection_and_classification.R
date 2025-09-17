@@ -35,17 +35,17 @@ EXPERIMENTS_DIR <- "/home/joern/.Datenplatte/Joerns Dateien/Aktuell/ABCPython/08
 
 # PSA das28crp data paths
 base_path_psa <- "/home/joern/Aktuell/RheumaMetabolomicsFFM"
-r_path_psa    <- "08AnalyseProgramme/R/OLD"
+r_path_psa <- "08AnalyseProgramme/R/OLD"
 
 psa_base_path <- file.path(base_path_psa, r_path_psa)
 
-training_file_psa   <- file.path(psa_base_path, "TrainingTestData_das28crp_all_items.csv")
+training_file_psa <- file.path(psa_base_path, "TrainingTestData_das28crp_all_items.csv")
 validation_file_psa <- file.path(psa_base_path, "ValidationData_das28crp_all_items.csv")
-full_data_file_psa  <- file.path(psa_base_path, "PSA_das28_all_items.csv")
+full_data_file_psa <- file.path(psa_base_path, "PSA_das28_all_items.csv")
 
 # Analysis parameters
 SEED <- 42
-noise_factor <- 0.2  # Not used here but kept for code consistency if needed later
+noise_factor <- 0.2 # Not used here but kept for code consistency if needed later
 CORRELATION_METHOD <- "pearson"
 CORRELATION_LIMIT <- 0.9
 Boruta_tentative_in <- FALSE
@@ -110,10 +110,10 @@ dfDAS28crp_validation_Target <- as.factor(ifelse(dfDAS28crp_validation$Cls == "r
 dfDAS28crp_validation <- dfDAS28crp_validation[, !names(dfDAS28crp_validation) %in% c("Cls", "Target", "ps_a_score")]
 
 # Assign to pipeline variables expected downstream
-training_data_original   <- dfDAS28crp_training
-training_target          <- dfDAS28crp_training_Target
+training_data_original <- dfDAS28crp_training
+training_target <- dfDAS28crp_training_Target
 validation_data_original <- dfDAS28crp_validation
-validation_target        <- dfDAS28crp_validation_Target
+validation_target <- dfDAS28crp_validation_Target
 
 ###############################################################################
 # Run analysis sequentially
@@ -135,31 +135,31 @@ combine_and_save_plots <- function(results_list, iteration = "Full dataset", add
   } else {
     results_list[["Curated subset iterations"]][[iteration]]$plots
   }
-  
-  matrix_plot  <- plots$matrix + theme(axis.text.y = element_text(size = 3))
+
+  matrix_plot <- plots$matrix + theme(axis.text.y = element_text(size = 3))
   summary_plot <- plots$summary
-  boruta_plot  <- plots$boruta + theme(axis.text.x = element_text(size = 5))
-  lasso_plot   <- plots$lasso + theme(axis.text.x = element_text(size = 5)) + ylim(0,3) 
-  
+  boruta_plot <- plots$boruta + theme(axis.text.x = element_text(size = 5))
+  lasso_plot <- plots$lasso + theme(axis.text.x = element_text(size = 5)) + ylim(0, 3)
+
   # Compose right column (matrix + summary stacked)
   right_column <- matrix_plot / summary_plot + plot_layout(heights = c(2, 1))
-  
+
   # Compose full plot layout
-  combined_plot <- boruta_plot + lasso_plot + right_column + 
+  combined_plot <- boruta_plot + lasso_plot + right_column +
     plot_layout(widths = c(2, 2, 1)) +
     plot_annotation(tag_levels = 'A')
-  
+
   print(combined_plot)
-  
+
   # Compose filenames
   suffix <- if (iteration == "Full dataset") "" else paste0("_", iteration)
   png_file <- paste0(DATASET_NAME, "_feature_selection_comparison", suffix, add_file_string, ".png")
   svg_file <- paste0(DATASET_NAME, "_feature_selection_comparison", suffix, add_file_string, ".svg")
-  
+
   # Save to files
   ggsave(png_file, plot = combined_plot, width = 14, height = 8, dpi = 300)
   ggsave(svg_file, plot = combined_plot, width = 14, height = 8)
-  
+
   invisible(combined_plot)
 }
 
@@ -194,13 +194,13 @@ for (name in names(datasets_to_test)) {
 # Run logistic regression variants on original data
 for (i in 1:2) {
   if (i == 2) sink(paste0(DATASET_NAME, "_lr_orig_output", ".txt"))
-  
+
   r1 <- run_single_logistic_regression(
     train_data = dfDAS28crp,
     train_target = as.factor(dfDAS28crp_Target),
     dataset_name = "Original unsplit"
   )
-  if (is.null(COLUMNS_COLINEAR)) { 
+  if (is.null(COLUMNS_COLINEAR)) {
     COLUMNS_COLINEAR <- rownames(alias(r1)$Complete)
     cat("\nCOLUMNS_COLINEAR\n", COLUMNS_COLINEAR)
   }
@@ -210,7 +210,7 @@ for (i in 1:2) {
     train_target = dfDAS28crp_Target,
     dataset_name = "Original unsplit colinear variables removed"
   )
-  
+
   if (i == 2) sink()
 }
 

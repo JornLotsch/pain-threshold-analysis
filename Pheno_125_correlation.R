@@ -21,10 +21,10 @@ library(viridis)
 ###############################################################################
 
 PREPARED_DATA_FILE_PATH <- "/home/joern/Aktuell/ABCPython/08AnalyseProgramme/R/ABC2way/Pheno_125_prepared_data.csv"
-SEED                <- 42              # Seed for reproducibility
-CORRELATION_METHOD  <- "pearson"       # Correlation calculation method
-CORRELATION_LIMIT   <- 0.9             # Threshold for correlation strength
-stepwise_corr_colors <- TRUE           # Use stepwise correlation coloring flag
+SEED <- 42 # Seed for reproducibility
+CORRELATION_METHOD <- "pearson" # Correlation calculation method
+CORRELATION_LIMIT <- 0.9 # Threshold for correlation strength
+stepwise_corr_colors <- TRUE # Use stepwise correlation coloring flag
 
 DATASET_NAME <- "Pheno_125"
 EXPERIMENTS_DIR <- "/home/joern/.Datenplatte/Joerns Dateien/Aktuell/ABCPython/08AnalyseProgramme/R/ABC2way/"
@@ -46,9 +46,9 @@ set_working_directory(EXPERIMENTS_DIR)
 
 # --- Stimulus Types Grouping ---
 stimulus_types <- list(
-  "Mechanical"        = c("Pressure", "vonFrey", "vonFrey_Capsaicin", "Pressure2"),
-  "Thermal"           = c("Heat", "Heat_Capsaicin", "Cold", "Cold_Menthol"),
-  "Electrical"        = c("Current"),
+  "Mechanical" = c("Pressure", "vonFrey", "vonFrey_Capsaicin", "Pressure2"),
+  "Thermal" = c("Heat", "Heat_Capsaicin", "Cold", "Cold_Menthol"),
+  "Electrical" = c("Current"),
   "SensitizationEffect" = c("Capsaicin_Effect_Heat", "Menthol_Effect_Cold", "Capsaicin_Effect_vonFrey")
 )
 
@@ -57,14 +57,14 @@ prepared_data <- read.csv(PREPARED_DATA_FILE_PATH, row.names = 1)
 
 # Split into predictors and target if needed
 target_data <- prepared_data$Target
-pain_data   <- prepared_data[, !(colnames(prepared_data) %in% "Target")]
+pain_data <- prepared_data[, !(colnames(prepared_data) %in% "Target")]
 
 ###############################################################################
 # --- Correlation Calculation ---
 ###############################################################################
 
-corr_mat          <- cor(pain_data[, !names(pain_data) %in% c("Pressure2")], method = CORRELATION_METHOD)
-corr_mat_modifed  <- cor(pain_data, method = CORRELATION_METHOD)
+corr_mat <- cor(pain_data[, !names(pain_data) %in% c("Pressure2")], method = CORRELATION_METHOD)
+corr_mat_modifed <- cor(pain_data, method = CORRELATION_METHOD)
 
 ###############################################################################
 # --- Color Mapping Setup for Heatmap ---
@@ -74,7 +74,7 @@ corr_mat_modifed  <- cor(pain_data, method = CORRELATION_METHOD)
 text_color_fun <- function(fill_color) {
   rgb_val <- col2rgb(fill_color) / 255
   brightness <- 0.299 * rgb_val[1,] + 0.587 * rgb_val[2,] + 0.114 * rgb_val[3,]
-  ifelse(brightness > 0.6, "#111111", "#FFFFFF")  # dark text on light bg, white text on dark bg
+  ifelse(brightness > 0.6, "#111111", "#FFFFFF") # dark text on light bg, white text on dark bg
 }
 
 if (stepwise_corr_colors) {
@@ -90,7 +90,7 @@ if (stepwise_corr_colors) {
   #   "#1a428c"   # Very large
   # )
   range_colors <- c(
-    colorRampPalette(c("ghostwhite", "dodgerblue2"))(length(breaks)-1),
+    colorRampPalette(c("ghostwhite", "dodgerblue2"))(length(breaks) - 1),
     "dodgerblue4")
   # range_colors <- c(
   #   colorRampPalette(c("ghostwhite", "gold"))(length(breaks)-1),
@@ -137,21 +137,21 @@ vir_group_colors <- setNames(viridis::viridis(4, option = "D"), cb_category_name
 # Define row annotation with stimulus groups; disable default legend drawing
 row_ha <- rowAnnotation(
   StimulusType = stim_category,
-  col          = list(StimulusType = vir_group_colors),
-  show_legend  = FALSE
+  col = list(StimulusType = vir_group_colors),
+  show_legend = FALSE
 )
 # Define row annotation with stimulus groups; disable default legend drawing
 column_ha <- HeatmapAnnotation(
   StimulusType = stim_category,
-  col          = list(StimulusType = vir_group_colors),
-  show_legend  = FALSE, 
+  col = list(StimulusType = vir_group_colors),
+  show_legend = FALSE,
   show_annotation_name = FALSE
 )
 # Create a stand-alone legend for stimulus groups to draw manually
 ann_legend <- Legend(
-  labels     = names(cb_group_colors),
-  legend_gp  = gpar(fill = vir_group_colors),
-  title      = "Stimulus Type"
+  labels = names(cb_group_colors),
+  legend_gp = gpar(fill = vir_group_colors),
+  title = "Stimulus Type"
 )
 
 ###############################################################################
@@ -159,7 +159,7 @@ ann_legend <- Legend(
 ###############################################################################
 
 create_heatmap <- function() {
-  
+
   ht <- Heatmap(
     as.matrix(abs(corr_mat_modifed)),
     col = col_fun,
@@ -172,32 +172,32 @@ create_heatmap <- function() {
     row_dend_width = unit(4, "cm"),
     column_dend_height = unit(4, "cm"),
     row_names_side = "left",
-    
-    # Add numeric correlation values inside heatmap cells with dynamic text color
+
+  # Add numeric correlation values inside heatmap cells with dynamic text color
     cell_fun = function(j, i, x, y, w, h, fill_col) {
       val <- round(corr_mat_modifed[i, j], 2)
       col_text <- text_color_fun(fill_col)
       grid.text(val, x, y, gp = gpar(fontsize = 10, fontfamily = "Arial", col = col_text))
     },
-    
-    left_annotation = row_ha,               # Add colored annotation bar for groups
+
+    left_annotation = row_ha, # Add colored annotation bar for groups
     bottom_annotation = column_ha, # Add colored annotation bar for groups
-    show_heatmap_legend = FALSE,            # Suppress default heatmap correlation legend
+    show_heatmap_legend = FALSE, # Suppress default heatmap correlation legend
     border = FALSE,
-    rect_gp = gpar(col = NA)                 # Remove heatmap cell borders
+    rect_gp = gpar(col = NA) # Remove heatmap cell borders
   )
-  
-  grid.newpage()                           # Start with a fresh graphics page
-  
-  draw(ht)                                # Draw heatmap with annotation
-  
+
+  grid.newpage() # Start with a fresh graphics page
+
+  draw(ht) # Draw heatmap with annotation
+
   # Draw annotation legend manually at lower-left corner with padding
   grid::pushViewport(grid::viewport())
   draw(ann_legend,
-       x = unit(0, "npc") + unit(7, "mm"),   # 7mm from left edge
-       y = unit(0, "npc") + unit(10, "mm"),  # 10mm from bottom edge
+       x = unit(0, "npc") + unit(7, "mm"), # 7mm from left edge
+       y = unit(0, "npc") + unit(10, "mm"), # 10mm from bottom edge
        just = c("left", "bottom"))
-  
+
   # Add a left-aligned title relative to the entire plotting device
   grid.text(
     "Correlation matrix",

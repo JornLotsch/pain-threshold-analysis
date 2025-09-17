@@ -36,10 +36,10 @@ EXPERIMENTS_DIR <- "/home/joern/.Datenplatte/Joerns Dateien/Aktuell/ABCPython/08
 
 # Dataset paths (now only training + validation CSVs)
 base_path <- "/home/joern/Dokumente/PainGenesDrugs"
-r_path    <- "08AnalyseProgramme/R"
+r_path <- "08AnalyseProgramme/R"
 
 train_file <- file.path(base_path, r_path, "PainThresholds_scaled_Training.csv")
-val_file   <- file.path(base_path, r_path, "PainThresholds_scaled_Test.csv")
+val_file <- file.path(base_path, r_path, "PainThresholds_scaled_Test.csv")
 
 # Analysis parameters
 SEED <- 42
@@ -69,16 +69,16 @@ DATASET_COLUMN_NAMES <- c(
 
 CURATED_COLUMN_NAMES <- c(
   "Heat", "Pressure", "Current", "Heat_Capsaicin",
-  "Cold", "Cold_Menthol", 
+  "Cold", "Cold_Menthol",
   "vonFrey", "vonFrey_Capsaicin"
 )
 
-COLUMNS_COLINEAR <- NULL  # Will be determined later
+COLUMNS_COLINEAR <- NULL # Will be determined later
 
 # Noise addition parameters
-ADD_NOISE_COLUMN   <- TRUE
+ADD_NOISE_COLUMN <- TRUE
 NOISE_COLUMN_SOURCE <- "Pressure"
-NOISE_COLUMN_NAME   <- "Pressure2"
+NOISE_COLUMN_NAME <- "Pressure2"
 
 ###############################################################################
 # Load External Functions
@@ -108,28 +108,28 @@ if (!file.exists(val_file)) {
 
 # --- Define paths ---
 base_path <- "/home/joern/Dokumente/PainGenesDrugs"
-r_path    <- "08AnalyseProgramme/R"
+r_path <- "08AnalyseProgramme/R"
 
 train_file <- file.path(base_path, r_path, "PainThresholds_scaled_Training.csv")
-val_file   <- file.path(base_path, r_path, "PainThresholds_scaled_Test.csv")
+val_file <- file.path(base_path, r_path, "PainThresholds_scaled_Test.csv")
 
 # --- Load datasets ---
 train_df <- read.csv(train_file, row.names = 1)
-val_df   <- read.csv(val_file, row.names = 1)
+val_df <- read.csv(val_file, row.names = 1)
 
 # --- Sizes to later reseparate ---
 n_train <- nrow(train_df)
-n_val   <- nrow(val_df)
+n_val <- nrow(val_df)
 
 # --- Extract features + targets ---
-train_features <- train_df[, -ncol(train_df)]
-train_target   <- train_df[,  ncol(train_df)]
+train_features <- train_df[, - ncol(train_df)]
+train_target <- train_df[, ncol(train_df)]
 
-val_features   <- val_df[, -ncol(val_df)]
-val_target     <- val_df[,  ncol(val_df)]
+val_features <- val_df[, - ncol(val_df)]
+val_target <- val_df[, ncol(val_df)]
 
 # --- Combine into pain_data + target_data ---
-pain_data   <- rbind(train_features, val_features)
+pain_data <- rbind(train_features, val_features)
 target_data <- c(train_target, val_target)
 
 # --- Rename columns once, for the combined dataset ---
@@ -139,23 +139,23 @@ pain_data <- rename_pain_data_columns(pain_data, DATASET_COLUMN_NAMES)
 set.seed(SEED)
 pain_data[[NOISE_COLUMN_NAME]] <- pain_data[[NOISE_COLUMN_SOURCE]] +
   rnorm(
-    n    = nrow(pain_data),
+    n = nrow(pain_data),
     mean = 0,
-    sd   = abs(pain_data[[NOISE_COLUMN_SOURCE]]) * noise_factor
+    sd = abs(pain_data[[NOISE_COLUMN_SOURCE]]) * noise_factor
   )
 
 # --- Reseparate into train/validation, consistent with original splits ---
-training_data_original   <- pain_data[1:n_train, ]
-validation_data_original <- pain_data[(n_train + 1):(n_train + n_val), ]
+training_data_original <- pain_data[1:n_train,]
+validation_data_original <- pain_data[(n_train + 1):(n_train + n_val),]
 
-training_target   <- target_data[1:n_train]
+training_target <- target_data[1:n_train]
 validation_target <- target_data[(n_train + 1):(n_train + n_val)]
 
 # --- Optional curation after renaming + noise ---
 if (use_curated) {
-  training_data_original   <- training_data_original[, CURATED_COLUMN_NAMES]
+  training_data_original <- training_data_original[, CURATED_COLUMN_NAMES]
   validation_data_original <- validation_data_original[, CURATED_COLUMN_NAMES]
-  pain_data                <- pain_data[, CURATED_COLUMN_NAMES]
+  pain_data <- pain_data[, CURATED_COLUMN_NAMES]
 }
 
 # Save data file for use in other analyses
@@ -176,49 +176,49 @@ results_list <- run_feature_selection_iterations()
 library(patchwork)
 
 # Function to combine and save plots for a given iteration or "Full dataset"
-combine_and_save_plots <- function(results_list, iteration = "Full dataset", add_file_string = "") {
+combine_and_save_plots <- function(results_list, iteration = "Full dataset", add_file_string = "", ylim = NULL) {
   # Extract plots based on iteration
   plots <- if (iteration == "Full dataset") {
     results_list[["Full dataset"]]$plots
   } else {
     results_list[["Curated subset iterations"]][[iteration]]$plots
   }
-  
-  matrix_plot  <- plots$matrix
+
+  matrix_plot <- plots$matrix
   summary_plot <- plots$summary
-  boruta_plot  <- plots$boruta
-  if (iteration == "Iter_1") lasso_plot   <- plots$lasso + ylim(ylim_full) else lasso_plot   <- plots$lasso
-  
+  boruta_plot <- plots$boruta
+  if (!is.null(ylim)) lasso_plot <- plots$lasso + ylim(ylim_full) else lasso_plot <- plots$lasso
+
   # Compose right column (matrix + summary stacked)
   right_column <- matrix_plot / summary_plot + plot_layout(heights = c(2, 1))
-  
+
   # Compose full plot layout
-  combined_plot <- boruta_plot + lasso_plot + right_column + 
+  combined_plot <- boruta_plot + lasso_plot + right_column +
     plot_layout(widths = c(2, 2, 1)) +
     plot_annotation(tag_levels = 'A')
-  
+
   print(combined_plot)
-  
+
   # Compose filenames
   suffix <- if (iteration == "Full dataset") "" else paste0("_", iteration)
   png_file <- paste0(DATASET_NAME, "_feature_selection_comparison", suffix, add_file_string, ".png")
   svg_file <- paste0(DATASET_NAME, "_feature_selection_comparison", suffix, add_file_string, ".svg")
-  
+
   # Save to files
   ggsave(png_file, plot = combined_plot, width = 14, height = 8, dpi = 300)
   ggsave(svg_file, plot = combined_plot, width = 14, height = 8)
-  
+
   invisible(combined_plot)
 }
-
-# Get y axis limits for LASSO plot to forward it to plot 2
-ylim_full <- ggplot_build(results_list$results_list$`Full dataset`$plots$lasso)$layout$panel_scales_y[[1]]$range$range
 
 # For full dataset
 combine_and_save_plots(results_list$results_list, "Full dataset")
 
+# Get y axis limits for LASSO plot to forward it to plot 2
+ylim_full <- ggplot_build(results_list$results_list$`Full dataset`$plots$lasso)$layout$panel_scales_y[[1]]$range$range
+
 # For first iteration of curated subset
-combine_and_save_plots(results_list$results_list, "Iter_1")
+combine_and_save_plots(results_list$results_list, "Iter_1", ylim = ylim_full)
 
 ###############################################################################
 # Run logistic regression on all datasets, collect results
@@ -248,47 +248,47 @@ for (name in names(datasets_to_test)) {
 # Run logistic regression variants on original data
 for (i in 1:2) {
   if (i == 2) sink(paste0(DATASET_NAME, "_lr_orig_output", ".txt"))
-  
+
   r1 <- run_single_logistic_regression(
     train_data = pain_data,
     train_target = target_data,
     dataset_name = "Original unsplit modified"
   )
-  if (is.null(COLUMNS_COLINEAR)) { 
+  if (is.null(COLUMNS_COLINEAR)) {
     COLUMNS_COLINEAR <- rownames(alias(r1)$Complete)
     cat("\nCOLUMNS_COLINEAR\n", COLUMNS_COLINEAR)
   }
-  
+
   run_single_logistic_regression(
     train_data = pain_data[, !names(pain_data) %in% c("Pressure2")],
     train_target = target_data,
     dataset_name = "Original unsplit unmodified"
   )
-  
+
   run_single_logistic_regression(
     train_data = training_data_original,
     train_target = train_target,
     dataset_name = "Training split modified"
   )
-  
+
   run_single_logistic_regression(
     train_data = training_data_original[, !names(training_data_original) %in% c("Pressure2")],
     train_target = train_target,
     dataset_name = "Training split unmodified"
   )
-  
+
   run_single_logistic_regression(
     train_data = pain_data[, !names(pain_data) %in% c("Pressure2", names(which(is.na(r1$coefficients))))],
     train_target = target_data,
     dataset_name = "Original unsplit modified VIF removed"
   )
-  
+
   run_single_logistic_regression(
-    train_data = pain_data[, names(pain_data) %in% c("Pressure2",COLUMNS_COLINEAR)],
+    train_data = pain_data[, names(pain_data) %in% c("Pressure2", COLUMNS_COLINEAR)],
     train_target = target_data,
     dataset_name = "Original unsplit only modifed variables"
   )
-  
+
   if (i == 2) sink()
 }
 
@@ -348,14 +348,14 @@ detailed_results <- cohens_d_results$combined_data %>%
       TRUE ~ "Large"
     )
   ) %>%
-  select(Variable, Dataset, Cohens_d, CI_lower, CI_upper, t_statistic, p_value, 
+  select(Variable, Dataset, Cohens_d, CI_lower, CI_upper, t_statistic, p_value,
          p_label = p_label, Effect_Size_Category)
 print(detailed_results)
 
 # Save detailed Cohen's d results to CSV
 write.csv(
-  detailed_results, 
-  paste0(DATASET_NAME, "_cohens_d_with_ttests_results",  ".csv"),
+  detailed_results,
+  paste0(DATASET_NAME, "_cohens_d_with_ttests_results", ".csv"),
   row.names = FALSE
 )
 
