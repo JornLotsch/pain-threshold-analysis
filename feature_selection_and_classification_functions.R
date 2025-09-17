@@ -634,8 +634,7 @@ plot_lasso <- function(plot_data, title) {
     ) +
     scale_fill_manual(
       values = c("Selected" = "chartreuse4", "Rejected" = "salmon")
-    ) +
-    ylim(0,1.5)
+    ) 
 }
 
 ###############################################################################

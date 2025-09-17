@@ -13,3 +13,6 @@ OLD
 *.png
 Opioidpatients_pharmacogenetics.R
 *ctree*
+*.eps
+*.tif
+

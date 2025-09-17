@@ -57,6 +57,7 @@ training_and_validation_subsplits <- TRUE
 TRAINING_PARTITION_SIZE <- 0.8
 VALIDATION_PARTITION_SIZE <- 0.8
 
+max_iterations <- 5
 RUN_ONE_ADDITIONAL_ITERATION <- FALSE
 
 # Dataset-specific configuration  
@@ -186,7 +187,7 @@ combine_and_save_plots <- function(results_list, iteration = "Full dataset", add
   matrix_plot  <- plots$matrix
   summary_plot <- plots$summary
   boruta_plot  <- plots$boruta
-  lasso_plot   <- plots$lasso
+  if (iteration == "Iter_1") lasso_plot   <- plots$lasso + ylim(ylim_full) else lasso_plot   <- plots$lasso
   
   # Compose right column (matrix + summary stacked)
   right_column <- matrix_plot / summary_plot + plot_layout(heights = c(2, 1))
@@ -210,11 +211,14 @@ combine_and_save_plots <- function(results_list, iteration = "Full dataset", add
   invisible(combined_plot)
 }
 
+# Get y axis limits for LASSO plot to forward it to plot 2
+ylim_full <- ggplot_build(results_list$results_list$`Full dataset`$plots$lasso)$layout$panel_scales_y[[1]]$range$range
+
 # For full dataset
-combine_and_save_plots(all_results_feature_selection, "Full dataset")
+combine_and_save_plots(results_list$results_list, "Full dataset")
 
 # For first iteration of curated subset
-combine_and_save_plots(all_results_feature_selection, "Iter_1")
+combine_and_save_plots(results_list$results_list, "Iter_1")
 
 ###############################################################################
 # Run logistic regression on all datasets, collect results
@@ -224,7 +228,7 @@ cat("\n", paste(rep("=", 80), collapse = ""), "\n")
 cat("SIMPLE LOGISTIC REGRESSION ANALYSIS\n")
 cat("\n", paste(rep("=", 80), collapse = ""), "\n")
 
-datasets_to_test <- all_results_feature_selection$`Full Dataset`$datasets_to_test
+datasets_to_test <- results_list$results_list$`Full Dataset`$datasets_to_test
 
 logistic_results <- list()
 
@@ -312,7 +316,7 @@ print(cohens_d_results$plot)
 ggsave(
   plot = cohens_d_results$plot,
   filename = paste0(DATASET_NAME, "_cohens_d_with_ttests", ".svg"),
-  width = 10,
+  width = 13,
   height = 7
 )
 

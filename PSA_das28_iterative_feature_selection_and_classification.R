@@ -52,6 +52,7 @@ Boruta_tentative_in <- FALSE
 use_nyt <- TRUE
 tune_RF <- TRUE
 mtry_12only <- FALSE
+max_iterations <- 5
 
 use_curated <- FALSE
 use_roc_auc <- FALSE
@@ -163,7 +164,7 @@ combine_and_save_plots <- function(results_list, iteration = "Full dataset", add
 }
 
 # For full dataset
-combine_and_save_plots(all_results_feature_selection, "Full dataset")
+combine_and_save_plots(results_list$results_list, "Full dataset")
 
 ###############################################################################
 # Run logistic regression on all datasets, collect results
@@ -173,7 +174,7 @@ cat("\n", paste(rep("=", 80), collapse = ""), "\n")
 cat("SIMPLE LOGISTIC REGRESSION ANALYSIS\n")
 cat("\n", paste(rep("=", 80), collapse = ""), "\n")
 
-datasets_to_test <- all_results_feature_selection$`Full dataset`$datasets_to_test
+datasets_to_test <- results_list$results_list$`Full dataset`$datasets_to_test
 
 logistic_results <- list()
 
