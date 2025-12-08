@@ -15,4 +15,5 @@ Opioidpatients_pharmacogenetics.R
 *ctree*
 *.eps
 *.tif
-
+*.rds
+!FlowChart.drawio.svg

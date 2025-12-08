@@ -49,7 +49,9 @@ CORRELATION_LIMIT <- 0.9
 Boruta_tentative_in <- FALSE
 use_nyt <- TRUE
 tune_RF <- TRUE
-mtry_12only <- TRUE
+tune_KNN <- TRUE
+tune_SVM <- TRUE
+mtry_12only <- FALSE
 
 use_curated <- FALSE
 use_roc_auc <- FALSE
@@ -160,14 +162,17 @@ if (use_curated) {
 
 # Save data file for use in other analyses
 Pheno_125_prepared_data <- cbind.data.frame(Target = target_data, pain_data)
-write.csv(Pheno_125_prepared_data, "Pheno_125_prepared_data.csv")
+# write.csv(Pheno_125_prepared_data, "Pheno_125_prepared_data.csv")
 
 ###############################################################################
 # Run analysis sequentially
 ###############################################################################
 
-results_list <- run_feature_selection_iterations()
-
+start_time <- Sys.time()
+Pheno125_results_list <- run_feature_selection_iterations()
+end_time <- Sys.time()
+elapsed_time <- end_time - start_time
+print(elapsed_time)
 
 ###############################################################################
 # Combine plots from 'Full Dataset' configuration
@@ -176,12 +181,12 @@ results_list <- run_feature_selection_iterations()
 library(patchwork)
 
 # Function to combine and save plots for a given iteration or "Full dataset"
-combine_and_save_plots <- function(results_list, iteration = "Full dataset", add_file_string = "", ylim = NULL) {
+combine_and_save_plots <- function(Pheno125_results_list, iteration = "Full dataset", add_file_string = "", ylim = NULL) {
   # Extract plots based on iteration
   plots <- if (iteration == "Full dataset") {
-    results_list[["Full dataset"]]$plots
+    Pheno125_results_list$Phase_0_Full$plots
   } else {
-    results_list[["Curated subset iterations"]][[iteration]]$plots
+    Pheno125_results_list$Phase_3_Final_Selected$plots
   }
 
   matrix_plot <- plots$matrix
@@ -212,13 +217,14 @@ combine_and_save_plots <- function(results_list, iteration = "Full dataset", add
 }
 
 # For full dataset
-combine_and_save_plots(results_list$results_list, "Full dataset")
+combine_and_save_plots(Pheno125_results_list$results_list, "Full dataset")
 
 # Get y axis limits for LASSO plot to forward it to plot 2
-ylim_full <- ggplot_build(results_list$results_list$`Full dataset`$plots$lasso)$layout$panel_scales_y[[1]]$range$range
+# ylim_full <- ggplot_build(Pheno125_results_list$results_list$Phase_0_Full$plots$lasso)$layout$panel_scales_y[[1]]$range$range
+ylim_full <- c(0,0.8)
 
 # For first iteration of curated subset
-combine_and_save_plots(results_list$results_list, "Iter_1", ylim = ylim_full)
+combine_and_save_plots(Pheno125_results_list$results_list, "other")
 
 ###############################################################################
 # Run logistic regression on all datasets, collect results
@@ -228,7 +234,7 @@ cat("\n", paste(rep("=", 80), collapse = ""), "\n")
 cat("SIMPLE LOGISTIC REGRESSION ANALYSIS\n")
 cat("\n", paste(rep("=", 80), collapse = ""), "\n")
 
-datasets_to_test <- results_list$results_list$`Full Dataset`$datasets_to_test
+datasets_to_test <- Pheno125_results_list$results_list$`Full Dataset`$datasets_to_test
 
 logistic_results <- list()
 

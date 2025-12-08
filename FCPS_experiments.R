@@ -19,6 +19,11 @@ training_and_validation_subsplits <- TRUE
 TRAINING_PARTITION_SIZE <- 0.8
 VALIDATION_PARTITION_SIZE <- 0.8
 
+tune_RF <- FALSE
+tune_KNN <- TRUE
+tune_SVM <- TRUE
+
+
 DATASET_NAME <- "Atom"
 EXPERIMENTS_DIR <- "/home/joern/.Datenplatte/Joerns Dateien/Aktuell/ABCPython/08AnalyseProgramme/R/ABC2way/"
 # External functions
@@ -141,45 +146,88 @@ flatten_byClass <- function(byClass, class_levels) {
   }
 }
 
-# Quick tune RF
-mtry_values <- c(1, 2)
-ntree_values <- c(500, 1000)
-
-results <- expand.grid(mtry = mtry_values, ntree = ntree_values)
-results$error <- NA
-
-for (i in 1:nrow(results)) {
-  set.seed(SEED)
-  model <- randomForest(as.factor(Cls) ~ ., data = train,
-                        mtry = results$mtry[i],
-                        ntree = results$ntree[i]
-  )
-  results$error[i] <- mean(model$err.rate[, 1]) # OOB error for classification
+# Quick tune RF  - do once before loop
+if (tune_RF) {
+  mtry_values <- c(1, 2)
+  ntree_values <- c(100, 200, 500, 1000, 1500)
+  
+  results <- expand.grid(mtry = mtry_values, ntree = ntree_values)
+  results$error <- NA
+  
+  for (i in 1:nrow(results)) {
+    set.seed(SEED)
+    model <- randomForest(as.factor(Cls) ~ ., data = train,
+                          mtry = results$mtry[i],
+                          ntree = results$ntree[i]
+    )
+    results$error[i] <- mean(model$err.rate[, 1]) # OOB error for classification
+  }
+  
+  # Find the best parameter set for RF
+  best_rf <- results[which.min(results$error),]
 }
 
-# Find the best parameter set
-best <- results[which.min(results$error),]
+# Quick tune SVM - do once before loop
+if (tune_SVM) {svm_tune_data <- within(train, rm(Cls))
+svm_tune_data$target <- as.factor(train$Cls)
+n_classes <- length(levels(svm_tune_data$target))
+# Rename classes to valid names
+new_levels <- paste0("Class", seq_len(n_classes))
+levels(svm_tune_data$target) <- new_levels
+# Setup CV control for tuning
+if (n_classes == 2) {
+  ctrl_tune <- caret::trainControl(method = "cv", number = 5,
+                                   classProbs = TRUE,
+                                   summaryFunction = twoClassSummary,
+                                   allowParallel = FALSE)
+  metric_tune <- "ROC"
+} else {
+  ctrl_tune <- caret::trainControl(method = "cv", number = 5,
+                                   classProbs = TRUE,
+                                   allowParallel = FALSE)
+  metric_tune <- "Accuracy"
+}
+
+set.seed(SEED)
+svm_tune_model <- suppressWarnings(
+  caret::train(
+    target ~ ., data = svm_tune_data,
+    method = "svmRadial",
+    trControl = ctrl_tune,
+    metric = metric_tune,
+    preProcess = c("center", "scale"),
+    tuneGrid = expand.grid(C = c(0.1, 1, 10), sigma = c(0.01, 0.1, 1))
+  )
+)
+
+# Find the best parameter set for SVM
+best_svm <- list(C = svm_tune_model$bestTune$C, sigma = svm_tune_model$bestTune$sigma)
+}
 
 # Helper to run the classifictaion tests
 run_one_iteration <- function(train_df, valid_df, seed) {
   # train Logistic Regression
   set.seed(seed)
   lr_model <- glm(Cls ~ ., data = train_df, family = binomial)
-
+  
   # train Random Forest
   set.seed(seed)
-  rf_model <- randomForest::randomForest(Cls ~ ., data = train_df, mtry = best$mtry, ntree = best$ntree)
-
+  if (tune_RF && exists("best_rf")) {
+    rf_model <- randomForest::randomForest(Cls ~ ., data = train_df, mtry = best_rf$mtry, ntree = best_rf$ntree)
+  } else {
+    rf_model <- randomForest::randomForest(Cls ~ ., data = train_df)
+  }
+  
   # train KNN using caret (with preprocessing)
   # Ensure levels are valid_df factor names
   set.seed(seed)
   train_knn <- train_df
   train_knn$Cls <- as.factor(train_knn$Cls)
   levels(train_knn$Cls) <- c("Class0", "Class1") # adjust if classes differ
-
+  
   ctrl <- caret::trainControl(method = "cv", number = 5,
                               classProbs = TRUE, summaryFunction = twoClassSummary)
-
+  
   set.seed(seed)
   knn_model <- caret::train(
     Cls ~ ., data = train_knn,
@@ -189,56 +237,96 @@ run_one_iteration <- function(train_df, valid_df, seed) {
     preProcess = c("center", "scale"),
     tuneLength = 5
   )
-
+  
   # train C5.0
   set.seed(seed)
   c50_model <- C50::C5.0(Cls ~ ., data = train_df)
-
+  
+  # train SVM
+  train_svm <- train_df
+  train_svm$Cls <- as.factor(train_svm$Cls)
+  
+  original_levels <- levels(train_svm$Cls)
+  n_classes_svm <- length(original_levels)
+  
+  new_levels <- paste0("Class", seq_len(n_classes_svm))
+  levels(train_svm$Cls) <- new_levels
+  
+  # Use method = "none" with pre-tuned C and sigma (no internal CV)
+  ctrl <- caret::trainControl(method = "none",
+                              classProbs = TRUE,
+                              allowParallel = FALSE)
+  
+  # Use tuned parameters if available, else defaults
+  C_value <- if(tune_SVM && exists("best_svm")) best_svm$C else 1
+  sigma_value <- if(tune_SVM && exists("best_svm")) best_svm$sigma else 0.1
+  
+  set.seed(seed)
+  svm_model <- suppressWarnings(
+    caret::train(
+      Cls ~ ., data = train_svm,
+      method = "svmRadial",
+      trControl = ctrl,
+      preProcess = c("center", "scale"),
+      tuneGrid = data.frame(C = C_value, sigma = sigma_value)
+    )
+  )
+  
   # Predict with all models on validation set (valid_df)
   # For LR (binary probability)
   lr_prob <- predict(lr_model, valid_df, type = "response")
   class_levels <- levels(FCPS_df_original$Target)
-
+  
   if (length(class_levels) == 2) {
     lr_pred <- factor(ifelse(lr_prob > 0.5, class_levels[2], class_levels[1]), levels = class_levels)
   } else {
     lr_pred <- factor(class_levels[1], levels = class_levels)
   }
-
+  
   rf_pred <- predict(rf_model, valid_df)
-
+  
   # For KNN: rename valid_df$Cls factor to match KNN train_df levels
   valid_knn <- valid_df
   valid_knn$Cls <- as.factor(valid_knn$Cls)
   levels(valid_knn$Cls) <- c("Class0", "Class1")
-
+  
   knn_pred <- predict(knn_model, valid_knn)
-
+  
   c50_pred <- predict(c50_model, valid_df)
-
+  
+  valid_svm <- valid_df
+  valid_svm$Cls <- as.factor(valid_svm$Cls)
+  levels(valid_svm$Cls) <- c("Class1", "Class2")
+  
+  svm_pred <- predict(svm_model, valid_df)
+  
   # Confusion matrices
   cm_lr <- caret::confusionMatrix(factor(valid_df$Cls, levels = class_levels), lr_pred, mode = "everything")
   cm_rf <- caret::confusionMatrix(factor(valid_df$Cls, levels = class_levels), rf_pred, mode = "everything")
   cm_knn <- caret::confusionMatrix(valid_knn$Cls, knn_pred, mode = "everything")
   cm_c50 <- caret::confusionMatrix(valid_df$Cls, c50_pred, mode = "everything")
-
+  cm_svm <- caret::confusionMatrix(valid_svm$Cls, svm_pred, mode = "everything")
+  
   # Flatten 'byClass' stats helper function assumed present
   byClass_lr <- flatten_byClass(cm_lr$byClass, class_levels)
   byClass_rf <- flatten_byClass(cm_rf$byClass, class_levels)
   byClass_knn <- flatten_byClass(cm_knn$byClass, levels(valid_knn$Cls))
   byClass_c50 <- flatten_byClass(cm_c50$byClass, class_levels)
-
+  byClass_svm <- flatten_byClass(cm_svm$byClass, levels(valid_svm$Cls))
+  
   overall_lr <- cm_lr$overall[c("Accuracy", "Kappa")]
   overall_rf <- cm_rf$overall[c("Accuracy", "Kappa")]
   overall_knn <- cm_knn$overall[c("Accuracy", "Kappa")]
   overall_c50 <- cm_c50$overall[c("Accuracy", "Kappa")]
-
+  overall_svm <- cm_svm$overall[c("Accuracy", "Kappa")]
+  
   lr_stats <- c(overall_lr, byClass_lr)
   rf_stats <- c(overall_rf, byClass_rf)
   knn_stats <- c(overall_knn, byClass_knn)
   c50_stats <- c(overall_c50, byClass_knn)
-
-  list(Logistic = lr_stats, RandomForest = rf_stats, KNN = knn_stats, C50 = c50_stats)
+  svm_stats <- c(overall_svm, byClass_svm)
+  
+  list(Logistic = lr_stats, RandomForest = rf_stats, KNN = knn_stats, C50 = c50_stats, SVM = svm_stats)
 }
 
 # Main execution
@@ -266,9 +354,9 @@ results_list <- pbmcapply::pbmclapply(seeds, function(seed) {
     train_df <- train
     valid_df <- valid
   }
-
+  
   run_one_iteration(train_df, valid_df, seed)
-
+  
 }, mc.cores = parallel::detectCores() - 1)
 
 # Convert list results into data frames ----------------------------------
@@ -284,6 +372,7 @@ df_lr <- extract_df(results_list, "Logistic")
 df_rf <- extract_df(results_list, "RandomForest")
 df_knn <- extract_df(results_list, "KNN")
 df_c50 <- extract_df(results_list, "C50")
+df_svm <- extract_df(results_list, "SVM")
 
 # Compute summary statistics (median, 2.5th and 97.5th percentiles) ------
 summary_stats <- function(df) {
@@ -299,6 +388,7 @@ summary_lr <- summary_stats(df_lr)
 summary_rf <- summary_stats(df_rf)
 summary_knn <- summary_stats(df_knn)
 summary_c50 <- summary_stats(df_c50)
+summary_svm <- summary_stats(df_svm)
 
 ###############################################################################
 # Show all results and write them to a text file 
@@ -307,18 +397,20 @@ summary_c50 <- summary_stats(df_c50)
 # View summarized statistics
 for (i in 1:2) {
   if (i == 2) sink(paste0(DATASET_NAME, "_lr_and_ml_output", ".txt"))
-
-  cat("\n\nLR ML summary\n")
-  print(summary_lr)
+  
   cat("\n\nRF ML summary\n")
   print(summary_rf)
+  cat("\n\nLR ML summary\n")
+  print(summary_lr)
   cat("\n\nKNN ML summary\n")
   print(summary_knn)
   cat("\n\nC5.0 ML summary\n")
   print(summary_c50)
-  cat("\n\nLogistic regression summary\n")
+  cat("\n\nSVM summary\n")
+  print(summary_svm)
+  cat("\n\nStandard statistical logistic regression summary\n")
   print(summary(model_lr_orig))
-
+  
   if (i == 2) sink()
 }
 

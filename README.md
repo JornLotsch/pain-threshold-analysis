@@ -1,80 +1,210 @@
-# Feature selection and machine learning classification pipeline
+# Resolving interpretation challenges in machine learning feature selection with an iterative approach in biomedical pain data
 
-This project provides an iterative machine-learning framework using ensemble feature selection and multiple classifiers to identify trait-relevant variables in pain-related datasets, ensuring interpretability by testing classification success on both selected and unselected features.
+## Three-Phase Iterative Feature Selection and Classification Pipeline: 
+
+This project provides a comprehensive three-phase iterative machine learning framework that systematically identifies the truly minimal sufficient feature set for classification while ensuring no valuable features are overlooked through rescue mechanisms and explicit detection of feature selection method limitations.
 
 ## Overview
 
-This repository provides a flexible framework for analyzing classification datasets through multiple feature selection methods and machine learning algorithms. Originally developed for pain threshold phenotype prediction using multimodal sensory data, the pipeline has been generalized for use with any tabular classification dataset.
+This repository provides a rigorous framework for analyzing classification datasets through an iterative three-phase approach combining multiple feature selection methods and machine learning algorithms. Originally developed for pain threshold phenotype prediction using multimodal sensory data, the pipeline has been generalized for use with any tabular classification dataset.
 
-## Key features
+The framework addresses a critical challenge in machine learning: feature selection methods may erroneously reject individually-strong features due to redundancy masking, interaction effects, or stochastic variability. Our three-phase approach systematically minimizes the feature set while implementing rescue mechanisms to recover falsely rejected features and explicitly flagging cases where feature selection methods fail to decompose complex interactions.
 
-- **Multiple feature selection methods**: Boruta algorithm and LASSO regularization
-- **Iterative analysis**: Automated iterative feature refinement with stopping criteria
-- **Multiple classifiers**: Random forest, logistic regression, and k-nearest neighbors
-- **Statistical validation**: 100-run bootstrap with 95% confidence intervals
+## Key Features
+
+- **Three-phase iterative approach**: Comprehensive feature selection (Phase 0), greedy backward elimination (Phase 1), and individual feature rescue with hierarchical verification (Phase 2-3)
+- **Multiple feature selection methods**: Boruta algorithm (nonlinear importance via Random Forest) and LASSO regularization (linear contributions with sparsity)
+- **Comprehensive classifier ensemble**: Random Forest, Logistic Regression, k-Nearest Neighbors, and C5.0 Decision Trees
+- **Rigorous statistical validation**: 100-run Monte Carlo cross-validation with 95% confidence intervals
+- **Rescue mechanisms**: Individual testing of rejected features and hierarchical re-analysis of rejected feature sets
+- **Limitation detection**: Explicit warnings when feature selection methods fail to identify responsible features in successful sets
 - **Effect size analysis**: Cohen's d calculations with statistical testing
 - **Comprehensive visualization**: Feature selection matrices, importance plots, and effect size visualizations
 - **Flexible configuration**: Easy adaptation to different datasets and analysis requirements
 
+## Algorithm Workflow
+
+![Image](FlowChart.drawio.svg)
+**Figure:** Flowchart of the four-phase feature selection framework. Blue elements represent decision points and final outputs. Gray boxes delineate Phases 0–3. The iterative loop in Phase 3 (right) continues until rejected features no longer enable classification.
+
+
+### Phase 0: Comprehensive Initial Feature Selection
+
+1. Apply Boruta algorithm and LASSO regularization to full **training** dataset
+2. Create multiple feature subset combinations:
+    - All features
+    - Boruta-selected features **("confirmed" only)**
+    - Boruta-rejected features
+    - LASSO-selected features **(non-zero coefficients at lambda.min)**
+    - LASSO-rejected features
+    - Union of Boruta and LASSO selections
+    - Intersection of Boruta and LASSO selections
+3. Test all combinations with five classifiers (RF, LR, KNN, C5.0, SVM) **tuned by grid search for hyperparameters**
+4. Identify smallest feature set achieving classification success (lower CI for balanced accuracy > 0.5)
+5. If no feature set succeeds, **including all features**, terminate with dataset unsuitability warning
+6. If **smallest successful subset is identical to full feature set**, terminate and return **"all features necessary"**; otherwise pass to Phase 1
+
+### Phase 1: Greedy Backward Elimination
+
+1. Start with smallest successful feature set from Phase 0
+2. Iteratively test removal of each individual feature
+3. Permanently remove features whose absence maintains classification success
+4. Continue until no further features can be removed without classification failure
+5. Result: Minimal feature set necessary for classification
+
+### Phase 2: Individual Feature Rescue
+
+1. Test each rejected feature individually for independent predictive ability
+2. Rescue any feature demonstrating classification success alone (lower CI > 0.5)
+3. Prevents loss of individually-strong features masked by redundancy or interactions
+4. Critical for scientific completeness: features with independent predictive power are valuable even if overshadowed during combined testing
+
+### Phase 3: Hierarchical Verification and Iterative Rescue
+
+1. Verify final selected feature set achieves classification success
+2. Test if rejected feature set (as a group) can still classify
+3. **If rejected set succeeds**: Apply complete Phase 0 pipeline to rejected features:
+    - Run Boruta and LASSO on rejected feature set
+    - Test all subset combinations (Boruta-selected, LASSO-selected, unions, intersections)
+    - Individually verify features identified by either method
+    - Rescue features demonstrating independent classification success
+4. **If no features identified but set succeeds**: Issue critical warning about feature selection method limitations
+5. Iterate rescue mechanism until rejected set fails classification
+6. Flag cases where complex feature interactions cannot be decomposed by feature selection methods
+
+## Classification Performance Criteria
+
+- **Metric**: Balanced accuracy (robust to class imbalance)
+- **Validation**: 100 runs Monte Carlo cross-validation (80% training, 20% validation)
+- **Success criterion**: Lower bound of 95% confidence interval for balanced accuracy > 0.5
+- **Requirement**: At least one classifier must achieve success criterion
+
+
 ## Scripts
 
-### Core pipeline
+### Core Pipeline
 
-- Core utility functions and classification algorithms: `feature_selection_and_classification_functions.R`
+- **`feature_selection_and_classification_functions.R`**: Core utility functions implementing the three-phase iterative framework
+    - `run_feature_selection_iterations()`: Main three-phase pipeline with rescue mechanisms
+    - `run_analysis_pipeline()`: Phase 0 comprehensive feature selection and classification
+    - `quick_classify_100_runs()`: 100-run Monte Carlo validation
+    - `run_boruta()`, `run_LASSO()`: Feature selection implementations
+    - Visualization functions for feature selection matrices and importance plots
 
-### Pain threshold specific scripts
+### Pain Threshold Analysis (12 Features)
 
-- Main analysis pipeline with iterative feature refinement for pain threshold data set: `Pheno_125_iterative_feature_selection_and_classification.R`
-- Correlation analysis and heatmap visualization for pain threshold data set: `Pheno_125_correlation.R`
-- Variance inflation factor analysis for multicollinearity detection for pain threshold data set: `Pheno_125_VIF.R`
+- **`Pheno_125_iterative_feature_selection_and_classification.R`**: Main analysis pipeline for pain threshold dataset
+- **`Pheno_125_correlation.R`**: Correlation analysis and heatmap visualization
+- **`Pheno_125_VIF.R`**: Variance Inflation Factor analysis for multicollinearity detection
 
-### PsA data specific scripts
+### Psoriatic Arthritis Analysis
 
-- Main analysis pipeline with iterative feature refinement for PsA data set: `PSA_das28_iterative_feature_selection_and_classification.R`
+- **`PSA_das28_iterative_feature_selection_and_classification.R`**: Analysis pipeline for PsA dataset
 
-### Analysis of synthetic data set
+### Synthetic Dataset Validation
 
-- Example analysis on FCPS clustering datasets demonstrating pipeline flexibility: `FCPS_experiments.R`
+- **`FCPS_experiments.R`**: Validation on FCPS clustering datasets (e.g., Atom dataset)
 
-## Algorithm workflow
+## Key Capabilities
 
-1. **Data loading & preprocessing**: Load features and targets, handle missing data, optional column renaming
-2. **Initial feature selection**: Run Boruta and LASSO on full dataset
-3. **Iterative refinement**:
-    - Create feature subsets based on selection results
-    - Test classification performance on multiple feature combinations
-    - Remove selected features and repeat if "rejected" features show good performance
-    - Continue until stopping criteria met (max iterations, no successful classification on rejected features)
-4. **Final analysis**: Generate comprehensive results tables, visualizations, and statistical summaries
+### Feature Selection
 
-## Key capabilities
-
-### Feature selection
-
-- **Boruta algorithm**: Wrapper method comparing feature importance against shadow features
-- **LASSO regularization**: L1 penalty for automatic feature selection
+- **Boruta algorithm**: Wrapper method capturing nonlinear importance and interactions via Random Forest
+- **LASSO regularization**: Embedded method capturing linear contributions with L1 sparsity penalty
+- **Complementary detection**: At least one method identifies features contributing to classification
 - **Correlation analysis**: Identify and handle multicollinear features
-- **Iterative refinement**: Progressive feature elimination based on performance
+- **Hierarchical rescue**: Progressive feature elimination with systematic recovery mechanisms
 
-### Classification methods
+### Classification Methods
 
-- **Random forests**: Ensemble method with hyperparameter tuning
-- **Logistic regression**: Linear classifier with regularization options
-- **k-nearest neighbors**: Instance-based learning with preprocessing
+- **Random Forest**: Ensemble method with hyperparameter tuning (mtry, ntree)
+- **Logistic Regression**: Linear classifier with binomial family
+- **k-Nearest Neighbors**: Instance-based learning with centering/scaling preprocessing
+- **C5.0 Decision Trees**: Rule-based classifier for interpretable models
+- **Support Vector Machines**: Margin-based hyperplane classifier (radial kernel) with hyperparameter traing (C, sigma)
 
-### Statistical analysis
+### Statistical Analysis
 
-- **Bootstrap validation**: 100 runs with confidence intervals
-- **Effect size calculation**: Cohen's d with confidence intervals
+- **Monte-Carlo validation**: 100 runs with 2.5th and 97.5th percentile confidence intervals
+- **Effect size calculation**: Cohen's d with confidence intervals and t-tests
 - **Performance metrics**: Balanced accuracy, AUC-ROC, confusion matrices
 - **Significance testing**: t-tests for feature differences between classes
 
-## Additional information
+### Output and Reporting
 
-### SPSS statistical analyses for comparison
+- **Results tables**: Comprehensive CSV files with all feature set combinations and performance metrics
+- **Feature history**: RDS files tracking feature selection decisions across phases
+- **Visualizations**: Feature selection matrices, importance plots, effect size plots
+- **Warning flags**: Explicit indicators for dataset unsuitability or method limitations
+- **Limitation transparency**: Critical warnings when feature selection methods fail to decompose interactions
+
+## Example Results Structure
+
+The pipeline generates comprehensive results including:
+
+1. **Phase 0 Results**: All tested feature combinations with classification performance
+2. **Minimal Feature Set**: Features surviving Phase 1 backward elimination
+3. **Rescued Features**: Features recovered in Phase 2 individual testing
+4. **Final Selected Features**: Union of minimal set and rescued features
+5. **Final Rejected Features**: Features failing all rescue attempts
+6. **Warning Flags**: Indicators for edge cases and method limitations
+7. **Feature Selection History**: Complete tracking of feature status through all phases
+
+## Handling Edge Cases
+
+The pipeline explicitly handles and reports:
+
+1. **No successful classification**: Terminates with dataset unsuitability warning
+2. **Full feature set required**: Flags when feature selection fails to create successful subsets
+3. **Complex interactions undetected**: Warning when rejected features succeed as group but no individual features or subsets can be identified by Boruta/LASSO
+4. **Rescue mechanism iterations**: Continues until rejected set definitively fails or all rescuable features are recovered
+
+## Dependencies
+
+```r
+library(parallel)           # Parallel processing
+library(opdisDownsampling)  # Balanced dataset splitting
+library(randomForest)       # Random Forest algorithm
+library(caret)              # ML toolkit
+library(pbmcapply)          # Parallel progress bars
+library(Boruta)             # Boruta feature selection
+library(reshape2)           # Data reshaping
+library(pROC)               # ROC/AUC analysis
+library(dplyr)              # Data wrangling
+library(glmnet)             # LASSO regression
+library(car)                # GLM diagnostics
+library(effsize)            # Cohen's d calculation
+library(ggplot2)            # Visualization
+library(tidyr)              # Data tidying
+library(C50)                # C5.0 decision trees
+```
+
+## Additional Information
+
+### SPSS Statistical Analyses for Comparison
 
 - **Pheno_125_SPSS_regression_complete_dataset.pdf**: Regression analysis results of pain threshold data
 - **PSA_das28crp_SPSS_regression_complete_dataset.pdf**: Regression analysis results of psoriatic arthritis phenotype data
+
+## Scientific Rationale
+
+The three-phase structure was deliberately chosen over alternative approaches:
+
+1. **Why not iterate Phases 0 and 1 repeatedly?**
+   - Computationally inefficient (repeated expensive Boruta/LASSO analyses)
+   - Provides diminishing returns (Phase 1 already exhaustively minimizes)
+   - Omits individual testing that prevents false rejection
+
+2. **Why include Phase 2 individual rescue?**
+   - Feature A with independent classification ability (CI > 0.5) might be rejected if features B and C together form stronger predictor
+   - A's individual importance is masked despite standalone predictive value
+   - Scientifically valuable to retain all individually-predictive features
+
+3. **Why hierarchical Phase 3 re-analysis?**
+   - Detects when rejected features succeed only through complex interactions
+   - Applies systematic feature selection to decompose responsible features
+   - Explicitly flags cases where both Boruta and LASSO fail
+   - Maintains scientific transparency about method limitations
 
 ## License
 
@@ -82,4 +212,4 @@ This project is licensed under the GNU General Public License v3.0 (GPL-3.0).
 
 ## Citation
 
-Lötsch, J, Himmelspach A, Kringel D. (2025). Resolving interpretation challenges in machine learning feature selection with an iterative approach in biomedical pain data. [submitted]
+Lötsch, J, Himmelspach A, Kringel D. (2025). Resolving interpretation challenges in machine learning feature selection with an iterative approach in biomedical pain data. [European Journal of Pain 2025 (in revision)]

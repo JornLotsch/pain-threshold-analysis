@@ -44,7 +44,7 @@ validation_file_psa <- file.path(psa_base_path, "ValidationData_das28crp_all_ite
 full_data_file_psa <- file.path(psa_base_path, "PSA_das28_all_items.csv")
 
 # Analysis parameters
-SEED <- 42
+SEED <- 4
 noise_factor <- 0.2 # Not used here but kept for code consistency if needed later
 CORRELATION_METHOD <- "pearson"
 CORRELATION_LIMIT <- 0.9
@@ -119,7 +119,11 @@ validation_target <- dfDAS28crp_validation_Target
 # Run analysis sequentially
 ###############################################################################
 
-results_list <- run_feature_selection_iterations()
+start_time <- Sys.time()
+PSA_results_list <- run_feature_selection_iterations()
+end_time <- Sys.time()
+elapsed_time <- end_time - start_time
+print(elapsed_time)
 
 ###############################################################################
 # Combine plots from 'Full Dataset' configuration
@@ -128,12 +132,12 @@ results_list <- run_feature_selection_iterations()
 library(patchwork)
 
 # Function to combine and save plots for a given iteration or "Full dataset"
-combine_and_save_plots <- function(results_list, iteration = "Full dataset", add_file_string = "") {
+combine_and_save_plots <- function(PSA_results_list, iteration = "Full dataset", add_file_string = "") {
   # Extract plots based on iteration
   plots <- if (iteration == "Full dataset") {
-    results_list[["Full dataset"]]$plots
+    PSA_results_list[["Full dataset"]]$plots
   } else {
-    results_list[["Curated subset iterations"]][[iteration]]$plots
+    PSA_results_list[["Curated subset iterations"]][[iteration]]$plots
   }
 
   matrix_plot <- plots$matrix + theme(axis.text.y = element_text(size = 3))
@@ -164,7 +168,7 @@ combine_and_save_plots <- function(results_list, iteration = "Full dataset", add
 }
 
 # For full dataset
-combine_and_save_plots(results_list$results_list, "Full dataset")
+combine_and_save_plots(PSA_results_list$results_list, "Full dataset")
 
 ###############################################################################
 # Run logistic regression on all datasets, collect results
@@ -174,7 +178,7 @@ cat("\n", paste(rep("=", 80), collapse = ""), "\n")
 cat("SIMPLE LOGISTIC REGRESSION ANALYSIS\n")
 cat("\n", paste(rep("=", 80), collapse = ""), "\n")
 
-datasets_to_test <- results_list$results_list$`Full dataset`$datasets_to_test
+datasets_to_test <- PSA_results_list$results_list$`Full dataset`$datasets_to_test
 
 logistic_results <- list()
 
