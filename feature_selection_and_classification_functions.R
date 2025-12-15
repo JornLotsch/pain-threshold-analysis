@@ -19,6 +19,8 @@ library(dplyr) # Data wrangling
 library(glmnet) # LASSO/logistic regression utilities
 library(car) # Linear and generalized linear model diagnostic tools
 library(R.utils) # For timeout
+library(broom) # For tidy() extraction of glm coefficients and p-values
+library(purrr) # For functional programming helpers
 
 ###############################################################################
 # Set working directory  ------------------------------------------
@@ -126,9 +128,9 @@ nyt_theme <- function() {
 # Classification Runner with Cross-Validation ----------------------------------
 
 # Timeout configuration parameters
-PER_ITERATION_TIMEOUT <- 60  # seconds - hard limit per single run
-MIN_SUCCESSFUL_RUNS <- 10     # minimum required for valid statistics
-EARLY_STOP_CHECK <- 20        # check after this many runs for early abort
+PER_ITERATION_TIMEOUT <- 60 # seconds - hard limit per single run
+MIN_SUCCESSFUL_RUNS <- 10 # minimum required for valid statistics
+EARLY_STOP_CHECK <- 20 # check after this many runs for early abort
 
 # Timeout function for Linux (fork-based)
 eval_with_timeout <- function(expr, envir = parent.frame(), timeout, on_timeout = c("error", "warning", "silent")) {
@@ -264,10 +266,10 @@ run_classifier_multiple_times <- function(train_data, train_target, test_data, t
           )
         )
         knn_tune_model$bestTune$k
-      }, timeout = PER_ITERATION_TIMEOUT * 5, on_timeout = "error")  # 5x longer for tuning
+      }, timeout = PER_ITERATION_TIMEOUT * 5, on_timeout = "error") # 5x longer for tuning
     }, error = function(e) {
       cat(" FAILED (using default k=5)\n")
-      5  # fallback default
+      5 # fallback default
     })
 
     if (!is.null(best_knn_k)) {
@@ -316,10 +318,10 @@ run_classifier_multiple_times <- function(train_data, train_target, test_data, t
           )
         )
         list(C = svm_tune_model$bestTune$C, sigma = svm_tune_model$bestTune$sigma)
-      }, timeout = PER_ITERATION_TIMEOUT * 5, on_timeout = "error")  # 5x longer for tuning
+      }, timeout = PER_ITERATION_TIMEOUT * 5, on_timeout = "error") # 5x longer for tuning
     }, error = function(e) {
       cat(" FAILED (using defaults C=1, sigma=0.1)\n")
-      list(C = 1, sigma = 0.1)  # fallback defaults
+      list(C = 1, sigma = 0.1) # fallback defaults
     })
 
     if (!is.null(best_svm_params)) {
@@ -468,7 +470,7 @@ run_classifier_multiple_times <- function(train_data, train_target, test_data, t
                                       allowParallel = FALSE)
 
           # Use tuned k if available, else default to 5
-          k_value <- if(tune_KNN && exists("best_knn_k")) best_knn_k else 5
+          k_value <- if (tune_KNN && exists("best_knn_k")) best_knn_k else 5
 
           model <- suppressWarnings(
             caret::train(
@@ -518,8 +520,8 @@ run_classifier_multiple_times <- function(train_data, train_target, test_data, t
                                       allowParallel = FALSE)
 
           # Use tuned parameters if available, else defaults
-          C_value <- if(tune_SVM && exists("best_svm_C")) best_svm_C else 1
-          sigma_value <- if(tune_SVM && exists("best_svm_sigma")) best_svm_sigma else 0.1
+          C_value <- if (tune_SVM && exists("best_svm_C")) best_svm_C else 1
+          sigma_value <- if (tune_SVM && exists("best_svm_sigma")) best_svm_sigma else 0.1
 
           model <- suppressWarnings(
             caret::train(
@@ -650,7 +652,7 @@ run_classifier_multiple_times <- function(train_data, train_target, test_data, t
 has_zero_variance <- function(data) {
   if (ncol(data) == 0 || nrow(data) == 0) return(TRUE)
   variances <- apply(data, 2, var, na.rm = TRUE)
-  all(variances == 0 | is.na(variances))  # Changed: any() → all()
+  all(variances == 0 | is.na(variances)) # Changed: any() → all()
 }
 
 # Classification function with 100 runs
@@ -1062,6 +1064,159 @@ run_single_logistic_regression <- function(train_data, train_target, dataset_nam
     return(NULL)
   })
 }
+
+###############################################################################
+# --- Penalized Logistic Regression Analysis ---
+###############################################################################
+
+library(glmnet)
+library(broom) # for tidy() on glm results (optional, but convenient)
+library(dplyr)
+library(purrr)
+library(tidyr)
+
+run_penalized_logistic_regression_all <- function(train_data,
+                                                  train_target,
+                                                  dataset_name,
+                                                  alpha_elastic = 0.5,
+                                                  nfolds = 5,
+                                                  seed = 123,
+                                                  ridge_threshold = 0.05) {
+
+  cat(sprintf("\n=== %s - Penalized Logistic Regression (ridge, lasso, elastic net) ===\n",
+              dataset_name))
+  cat(sprintf("Dataset: %d features, %d samples\n",
+              ncol(train_data), nrow(train_data)))
+
+  if (ncol(train_data) == 0 || nrow(train_data) == 0) {
+    cat("No data available - skipping\n")
+    return(NULL)
+  }
+
+  ## ---------- 1. Prepare outcome and design matrix ----------
+  y_factor <- as.factor(train_target)
+  if (nlevels(y_factor) != 2) {
+    stop("train_target must be a binary factor")
+  }
+  y <- ifelse(y_factor == levels(y_factor)[2], 1, 0)
+
+  # model.matrix will create dummy variables if needed
+  X <- model.matrix(~., data = train_data)[, -1, drop = FALSE] # drop intercept column
+
+  ## ---------- 2. Standard logistic regression (for p values) ----------
+  lr_train_data <- train_data
+  lr_train_data$target <- y_factor
+
+  if (ncol(train_data) == 1) {
+    formula_str <- paste("target ~", names(train_data)[1])
+  } else {
+    formula_str <- "target ~ ."
+  }
+
+  glm_fit <- glm(as.formula(formula_str), data = lr_train_data, family = binomial)
+
+  # Get coefficient table, including p values, as a data frame
+  glm_coef_df <- broom::tidy(glm_fit) %>%
+    filter(term != "(Intercept)") %>% # drop intercept
+  select(variable = term,
+           glm_estimate = estimate,
+           glm_p = p.value)
+
+  ## ---------- 3. Fit penalized models ----------
+  set.seed(seed)
+
+  # Helper to fit cv.glmnet and extract coefficients at lambda.min
+  fit_penalized <- function(alpha_value) {
+    cv_fit <- cv.glmnet(
+      x = X,
+      y = y,
+      family = "binomial",
+      alpha = alpha_value,
+      nfolds = nfolds
+    )
+
+    best_lambda <- cv_fit$lambda.min
+
+    final_model <- glmnet(
+      x = X,
+      y = y,
+      family = "binomial",
+      alpha = alpha_value,
+      lambda = best_lambda
+    )
+
+    list(cv_fit = cv_fit,
+         model = final_model,
+         lambda = best_lambda)
+  }
+
+  ridge_res <- fit_penalized(alpha_value = 0)
+  lasso_res <- fit_penalized(alpha_value = 1)
+  elastic_res <- fit_penalized(alpha_value = alpha_elastic)
+
+  cat(sprintf("ridge  lambda.min = %g\n", ridge_res$lambda))
+  cat(sprintf("lasso  lambda.min = %g\n", lasso_res$lambda))
+  cat(sprintf("elastic lambda.min = %g (alpha = %.2f)\n",
+              elastic_res$lambda, alpha_elastic))
+
+  ## ---------- 4. Extract coefficient vectors ----------
+  get_coef_df <- function(res, label) {
+    cf <- as.matrix(coef(res$model)) # includes intercept
+    tibble(
+      variable = rownames(cf),
+      coef = as.numeric(cf)
+    ) %>%
+      filter(variable != "(Intercept)") %>%
+      rename_with(~paste0(label, "_coef"), .cols = coef)
+  }
+
+  ridge_coef_df <- get_coef_df(ridge_res, "ridge")
+  lasso_coef_df <- get_coef_df(lasso_res, "lasso")
+  elastic_coef_df <- get_coef_df(elastic_res, "elastic")
+
+  ## ---------- 5. Merge all coefficients ----------
+  coef_table <- glm_coef_df %>%
+    full_join(ridge_coef_df, by = "variable") %>%
+    full_join(lasso_coef_df, by = "variable") %>%
+    full_join(elastic_coef_df, by = "variable")
+
+  # Make sure we have all variables that appear in X, even if dropped in glm
+  # (e.g., due to singularities)
+  all_vars <- setdiff(colnames(X), "(Intercept)")
+  coef_table <- coef_table %>%
+    right_join(tibble(variable = all_vars), by = "variable") %>%
+    arrange(variable)
+
+  ## ---------- 6. Selection indicators ----------
+  coef_table <- coef_table %>%
+    mutate(
+      ridge_selected = if_else(!is.na(ridge_coef) & abs(ridge_coef) > ridge_threshold, TRUE, FALSE),
+      lasso_selected = if_else(!is.na(lasso_coef) & lasso_coef != 0, TRUE, FALSE),
+      elastic_selected = if_else(!is.na(elastic_coef) & elastic_coef != 0, TRUE, FALSE)
+    )
+
+  ## ---------- 7. Print a compact table ----------
+  cat("\n=== Variable selection summary ===\n")
+  print(
+    as.data.frame(coef_table) %>%
+      select(variable,
+             glm_p,
+             ridge_coef, ridge_selected,
+             lasso_coef, lasso_selected,
+             elastic_coef, elastic_selected)
+  )
+
+  ## ---------- 8. Return everything for further use ----------
+  invisible(list(
+    glm_fit = glm_fit,
+    ridge = ridge_res,
+    lasso = lasso_res,
+    elastic = elastic_res,
+    coef_table = coef_table,
+    levels = levels(y_factor)
+  ))
+}
+
 
 ###############################################################################
 # --- Cohen's d effect sizes ---
@@ -1523,7 +1678,7 @@ run_feature_selection_iterations <- function() {
   available_features <- names(training_data_original)
 
   # Find ALL successful datasets from Phase 0
-  successful_datasets <- results_table_full[results_table_full$Classification_Success == 1, ]
+  successful_datasets <- results_table_full[results_table_full$Classification_Success == 1,]
 
   # CRITICAL CHECK: If NO dataset in Phase 0 succeeded, stop
   if (nrow(successful_datasets) == 0) {
@@ -1560,7 +1715,7 @@ run_feature_selection_iterations <- function() {
   # If we reach here, at least ONE feature set in Phase 0 succeeded
   # Find the smallest successful set to start minimization
   smallest_idx <- which.min(successful_datasets$Features)
-  smallest_successful_dataset <- successful_datasets[smallest_idx, ]
+  smallest_successful_dataset <- successful_datasets[smallest_idx,]
   smallest_successful_name <- smallest_successful_dataset$Dataset
 
   # Extract actual features from this dataset
@@ -1601,23 +1756,23 @@ run_feature_selection_iterations <- function() {
   # --- Phase 1: Minimize the Successful Set ---
   cat("\n=== PHASE 1: Minimizing Feature Set ===\n")
   cat("Attempting to remove features one-by-one while maintaining classification success...\n\n")
-  
+
   current_features <- starting_features
   removed_features <- c()
-  
+
   while (length(current_features) > 1) {
     cat(sprintf("Current set size: %d features\n", length(current_features)))
-    
+
     # Test removing each feature
     best_removal <- NULL
     best_removal_ba <- -Inf
     can_remove_any <- FALSE
-    
+
     for (feature_to_test in current_features) {
       remaining <- setdiff(current_features, feature_to_test)
-      
+
       cat(sprintf("  Testing removal of '%s' ... ", feature_to_test))
-      
+
       test_results <- quick_classify_100_runs(
         train_data = training_data_original[, remaining, drop = FALSE],
         train_target = training_target,
@@ -1625,7 +1780,7 @@ run_feature_selection_iterations <- function() {
         test_target = validation_target,
         dataset_name = paste0("Minimize_Without_", feature_to_test)
       )
-      
+
       # Check if ANY classifier still succeeds (lower CI > 0.5)
       still_succeeds <- any(
         test_results$RF$ba_ci_lower > 0.5,
@@ -1634,10 +1789,10 @@ run_feature_selection_iterations <- function() {
         test_results$C50$ba_ci_lower > 0.5,
         na.rm = TRUE
       )
-      
+
       mdn_ba <- median(c(test_results$RF$ba_median, test_results$LR$ba_median,
                        test_results$KNN$ba_median, test_results$C50$ba_median), na.rm = TRUE)
-      
+
       if (still_succeeds) {
         cat(sprintf("CAN remove (BA=%.3f, success maintained)\n", mdn_ba))
         can_remove_any <- TRUE
@@ -1649,7 +1804,7 @@ run_feature_selection_iterations <- function() {
         cat(sprintf("CANNOT remove (BA=%.3f, would lose classification)\n", mdn_ba))
       }
     }
-    
+
     if (can_remove_any && !is.null(best_removal)) {
       cat(sprintf("\n→ Removing '%s' (best candidate, BA=%.3f)\n\n", best_removal, best_removal_ba))
       current_features <- setdiff(current_features, best_removal)
@@ -1659,7 +1814,7 @@ run_feature_selection_iterations <- function() {
       break
     }
   }
-  
+
   minimal_features <- current_features
   cat(sprintf("\nPhase 1 complete. Minimal feature set: %d features\n", length(minimal_features)))
   cat(sprintf("  Features: %s\n", paste(minimal_features, collapse = ", ")))
@@ -1726,11 +1881,11 @@ run_feature_selection_iterations <- function() {
   } else {
     cat("No rejected features to test (all features in minimal set).\n")
   }
-  
+
   # Final feature sets
   final_selected_features <- union(minimal_features, rescued_features)
   final_rejected_features <- setdiff(available_features, final_selected_features)
-  
+
   cat(sprintf("\nPhase 2 complete.\n"))
   cat(sprintf("  Minimal set: %d features\n", length(minimal_features)))
   cat(sprintf("  Rescued: %d features\n", length(rescued_features)))
@@ -1756,7 +1911,7 @@ run_feature_selection_iterations <- function() {
 
   selected_success <- any(final_selected_results$results_table$Classification_Success == 1)
   cat(sprintf("\n✓ Final selected features: Classification %s\n",
-              if(selected_success) "SUCCESSFUL ✓" else "FAILED ✗ (ERROR!)"))
+              if (selected_success) "SUCCESSFUL ✓" else "FAILED ✗ (ERROR!)"))
 
   # Test final rejected features using full pipeline analysis
   final_rejected_results <- NULL
@@ -1781,7 +1936,7 @@ run_feature_selection_iterations <- function() {
 
     rejected_success <- any(final_rejected_results$results_table$Classification_Success == 1)
     cat(sprintf("\n✓ Final rejected features: Classification %s\n",
-                if(rejected_success) "SUCCESSFUL ✗ (WARNING!)" else "FAILED ✓ (correct)"))
+                if (rejected_success) "SUCCESSFUL ✗ (WARNING!)" else "FAILED ✓ (correct)"))
 
     # If rejected features can classify, examine which subsets are responsible
     if (rejected_success) {
@@ -1973,7 +2128,7 @@ run_feature_selection_iterations <- function() {
 
           rejected_success_updated <- any(final_rejected_results$results_table$Classification_Success == 1)
           cat(sprintf("\n✓ Updated final rejected features: Classification %s\n",
-                      if(rejected_success_updated) "SUCCESSFUL ✗ (still WARNING!)" else "FAILED ✓ (now correct)"))
+                      if (rejected_success_updated) "SUCCESSFUL ✗ (still WARNING!)" else "FAILED ✓ (now correct)"))
         } else {
           cat("\nNo rejected features remaining after rescue.\n")
         }
@@ -1982,7 +2137,7 @@ run_feature_selection_iterations <- function() {
   } else {
     cat("\nNo rejected features to test (all features selected).\n")
   }
-  
+
   # --- Compile Results ---
   add_features_column <- function(results_table, datasets_to_test) {
     results_table$Features_Used <- sapply(results_table$Dataset, function(dataset_name) {
@@ -1996,28 +2151,28 @@ run_feature_selection_iterations <- function() {
     })
     return(results_table)
   }
-  
+
   combined_results_table <- add_features_column(results_table_full, full_results$datasets_to_test)
   combined_results_table$Phase <- "Phase_0_Full"
-  
-  final_selected_table <- add_features_column(final_selected_results$results_table, 
+
+  final_selected_table <- add_features_column(final_selected_results$results_table,
                                               final_selected_results$datasets_to_test)
   final_selected_table$Phase <- "Phase_3_Final_Selected"
   combined_results_table <- rbind(combined_results_table, final_selected_table)
-  
+
   if (!is.null(final_rejected_results)) {
-    final_rejected_table <- add_features_column(final_rejected_results$results_table, 
+    final_rejected_table <- add_features_column(final_rejected_results$results_table,
                                                 final_rejected_results$datasets_to_test)
     final_rejected_table$Phase <- "Phase_3_Final_Rejected"
     combined_results_table <- rbind(combined_results_table, final_rejected_table)
   }
-  
+
   col_order <- c(setdiff(names(combined_results_table), "Features_Used"), "Features_Used")
   combined_results_table <- combined_results_table[, col_order]
-  
+
   write.csv(combined_results_table,
             paste0(DATASET_NAME, "_minimal_feature_selection_results.csv"), row.names = FALSE)
-  
+
   # Save feature selection history
   feature_history <- list(
     starting_set = starting_features,
@@ -2028,14 +2183,14 @@ run_feature_selection_iterations <- function() {
     final_selected = final_selected_features,
     final_rejected = final_rejected_features
   )
-  
+
   saveRDS(feature_history, paste0(DATASET_NAME, "_minimal_feature_history.rds"))
-  
+
   # Final summary
-  cat("\n" , paste(rep("=", 70), collapse = ""), "\n")
+  cat("\n", paste(rep("=", 70), collapse = ""), "\n")
   cat("=== MINIMAL FEATURE SELECTION COMPLETE ===\n")
   cat(paste(rep("=", 70), collapse = ""), "\n\n")
-  cat(sprintf("Starting from smallest successful set ('%s'): %d features\n", 
+  cat(sprintf("Starting from smallest successful set ('%s'): %d features\n",
               smallest_successful_name, length(starting_features)))
   cat(sprintf("After minimization: %d features\n", length(minimal_features)))
   cat(sprintf("Rescued from rejected: %d features\n", length(rescued_features)))
@@ -2053,7 +2208,7 @@ run_feature_selection_iterations <- function() {
     final_features = final_selected_features,
     excluded_features = final_rejected_features,
     feature_history = feature_history,
-    fs_limitation_warning = if(exists("warning_issued")) warning_issued else FALSE
+    fs_limitation_warning = if (exists("warning_issued")) warning_issued else FALSE
   ))
 }
 

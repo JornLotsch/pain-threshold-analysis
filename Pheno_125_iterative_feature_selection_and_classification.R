@@ -302,6 +302,40 @@ cat("\n", paste(rep("=", 80), collapse = ""), "\n")
 cat("Logistic regression analysis completed!\n")
 cat("\n", paste(rep("=", 80), collapse = ""), "\n")
 
+
+# ========== PENALIZED LOGISTIC REGRESSION ANALYSIS ==========
+cat("\n", paste(rep("=", 80), collapse = ""), "\n")
+cat("PENALIZED LOGISTIC REGRESSION ANALYSIS\n")
+cat(paste(rep("=", 80), collapse = ""), "\n\n")
+
+# Run penalized analysis and capture to file
+sink(paste0(DATASET_NAME, "_penalized_lr_output.txt"))
+pen_res <- run_penalized_logistic_regression_all(
+  train_data = pain_data,
+  train_target = target_data,
+  dataset_name = "Original unsplit - Penalized (ridge/lasso/elastic)",
+  alpha_elastic = 0.5,
+  nfolds = 5,
+  ridge_threshold = 0.05,
+  seed = 123
+)
+sink()
+
+# ========== EXPORT RESULTS TO CSV FOR PAPER ==========
+# Save the comparison table as CSV (perfect for paper tables)
+write.csv(pen_res$coef_table,
+          paste0(DATASET_NAME, "_penalized_comparison_table.csv"),
+          row.names = FALSE)
+
+cat("\n", paste(rep("=", 80), collapse = ""), "\n")
+cat("ANALYSIS COMPLETED! Files created:\n")
+cat(sprintf("  - %s_lr_orig_output.txt\n", DATASET_NAME))
+cat(sprintf("  - %s_penalized_lr_output.txt\n", DATASET_NAME))
+cat(sprintf("  - %s_penalized_comparison_table.csv\n", DATASET_NAME))
+cat(sprintf("  - %s_selection_summary.csv\n", DATASET_NAME))
+cat(paste(rep("=", 80), collapse = ""), "\n")
+
+
 ###############################################################################
 # Calculate Cohen's d and t-tests for both datasets, then plot
 ###############################################################################

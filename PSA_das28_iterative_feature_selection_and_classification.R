@@ -25,6 +25,7 @@ library(patchwork)
 ###############################################################################
 # Configuration Parameters 
 ###############################################################################
+setwd("/home/joern/.Datenplatte/Joerns Dateien/Aktuell/ABCPython/08AnalyseProgramme/R/ABC2way/")
 
 # External functions (still needed for rename_pain_data_columns and others)
 FUNCTIONS_FILE_PATH <- "/home/joern/.Datenplatte/Joerns Dateien/Aktuell/ABCPython/08AnalyseProgramme/R/ABC2way/feature_selection_and_classification_functions.R"
@@ -221,4 +222,43 @@ for (i in 1:2) {
 cat("\n", paste(rep("=", 80), collapse = ""), "\n")
 cat("Logistic regression analysis completed!\n")
 cat("\n", paste(rep("=", 80), collapse = ""), "\n")
+
+
+# ========== PENALIZED LOGISTIC REGRESSION ANALYSIS ==========
+cat("\n", paste(rep("=", 80), collapse = ""), "\n")
+cat("PENALIZED LOGISTIC REGRESSION ANALYSIS\n")
+cat(paste(rep("=", 80), collapse = ""), "\n\n")
+
+# Run penalized analysis and capture to file
+sink(paste0(DATASET_NAME, "_penalized_lr_output.txt"))
+pen_res <- run_penalized_logistic_regression_all(
+  train_data = dfDAS28crp,
+  train_target = as.factor(dfDAS28crp_Target),
+  dataset_name = "Original unsplit - Penalized (ridge/lasso/elastic)",
+  alpha_elastic = 0.5,
+  nfolds = 5,
+  ridge_threshold = 0.05,
+  seed = 123
+)
+sink()
+
+# ========== EXPORT RESULTS TO CSV FOR PAPER ==========
+# Save the comparison table as CSV (perfect for paper tables)
+variances <- apply(dfDAS28crp, 2, var)
+df_variances <- cbind.data.frame(variable = names(variances), var = variances)
+
+pen_res$coef_table <- pen_res$coef_table %>%
+  left_join(df_variances, by = "variable")
+
+write.csv(pen_res$coef_table,
+          paste0(DATASET_NAME, "_penalized_comparison_table.csv"),
+          row.names = FALSE)
+
+cat("\n", paste(rep("=", 80), collapse = ""), "\n")
+cat("ANALYSIS COMPLETED! Files created:\n")
+cat(sprintf("  - %s_lr_orig_output.txt\n", DATASET_NAME))
+cat(sprintf("  - %s_penalized_lr_output.txt\n", DATASET_NAME))
+cat(sprintf("  - %s_penalized_comparison_table.csv\n", DATASET_NAME))
+cat(sprintf("  - %s_selection_summary.csv\n", DATASET_NAME))
+cat(paste(rep("=", 80), collapse = ""), "\n")
 

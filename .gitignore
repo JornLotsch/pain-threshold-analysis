@@ -17,3 +17,8 @@ Opioidpatients_pharmacogenetics.R
 *.tif
 *.rds
 !FlowChart.drawio.svg
+README1.md
+feature_selection_and_classification_functions1.R
+*boruta*
+penalized_regression.R
+*xor*

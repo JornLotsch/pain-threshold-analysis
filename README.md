@@ -79,6 +79,37 @@ The framework addresses a critical challenge in machine learning: feature select
 - **Success criterion**: Lower bound of 95% confidence interval for balanced accuracy > 0.5
 - **Requirement**: At least one classifier must achieve success criterion
 
+### Return Value Structure
+
+`run_feature_selection_iterations()` returns a nested list with the following structure:
+
+<pre>
+results_list
+├── $results_list
+│   └── $`Full dataset`
+│       ├── $final_selected_features       # Character vector: minimal + rescued features
+│       ├── $final_rejected_features       # Character vector: definitively rejected features
+│       ├── $minimal_feature_set          # Character vector: Phase 1 minimal set
+│       ├── $rescued_features             # Character vector: Phase 2 rescued features
+│       ├── $phase0_results               # Data frame: all Phase 0 combinations tested
+│       ├── $datasets_to_test             # List: feature subsets used in analysis
+│       ├── $plots                        # List of ggplot objects
+│       │   ├── $matrix                   # Feature selection matrix heatmap
+│       │   ├── $summary                  # Classification performance summary
+│       │   ├── $boruta                   # Boruta importance plot
+│       │   └── $lasso                    # LASSO coefficients plot
+│       ├── $ML_results                   # Data frame: classification performance metrics
+│       ├── $warning_flags                # List: edge case indicators
+│       │   ├── $dataset_unsuitable       # Logical: no successful classification
+│       │   ├── $all_features_necessary   # Logical: cannot reduce feature set
+│       │   └── $method_limitation_detected # Logical: Boruta/LASSO failed to decompose
+│       └── $feature_selection_history    # Data frame: tracking feature status across phases
+│
+└── $execution_details
+    ├── $timestamp
+    ├── $configuration
+    └── $iterations_performed
+</pre>
 
 ## Scripts
 
@@ -181,8 +212,39 @@ library(C50)                # C5.0 decision trees
 
 ## Additional Information
 
-### SPSS Statistical Analyses for Comparison
+### Complementary Statistical Analyses
 
+Beyond the machine learning pipeline, the repository includes functions for traditional statistical analyses to complement and validate feature selection results:
+
+#### Standard and Penalized Logistic Regression
+
+- **`run_single_logistic_regression()`**: Fits standard logistic regression models with complete coefficient summaries, p-values, and diagnostic statistics
+- **`run_penalized_logistic_regression_all()`**: Implements Ridge (α=0), LASSO (α=1), and Elastic Net (α=0.5) penalized regression with cross-validated lambda selection
+    - Compares coefficients across all three penalty types
+    - Identifies features selected by each method (non-zero coefficients for LASSO/Elastic Net, threshold-based for Ridge)
+    - Outputs comparison tables suitable for publication
+
+#### Effect Size Analysis
+
+- **`calculate_cohens_d_with_ttest()`**: Calculates Cohen's d effect sizes with 95% confidence intervals and paired t-tests for all features
+- **`plot_cohens_d()`**: Visualizes effect sizes across multiple datasets with significance indicators
+    - Categorizes effects as negligible (|d| < 0.2), small (0.2-0.5), medium (0.5-0.8), or large (≥ 0.8)
+    - Highlights statistically significant differences
+
+These analyses are typically applied to:
+- Selected feature subsets from the three-phase pipeline
+- Original complete dataset (with/without multicollinear variables)
+- Training and validation splits separately
+- Comparing modified vs. unmodified feature sets (e.g., with/without noise variables)
+
+**Output files:**
+- `[DATASET_NAME]_lr_orig_output.txt`: Complete logistic regression summaries
+- `[DATASET_NAME]_penalized_lr_output.txt`: Penalized regression results with optimal lambdas
+- `[DATASET_NAME]_penalized_comparison_table.csv`: Coefficient comparison across Ridge/LASSO/Elastic Net
+- `[DATASET_NAME]_cohens_d_with_ttests_results.csv`: Effect sizes with confidence intervals and p-values
+- `[DATASET_NAME]_cohens_d_with_ttests.svg`: Effect size visualization
+
+### SPSS Statistical Analyses for Comparison
 - **Pheno_125_SPSS_regression_complete_dataset.pdf**: Regression analysis results of pain threshold data
 - **PSA_das28crp_SPSS_regression_complete_dataset.pdf**: Regression analysis results of psoriatic arthritis phenotype data
 

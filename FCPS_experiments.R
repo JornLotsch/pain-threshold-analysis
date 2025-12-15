@@ -204,29 +204,87 @@ svm_tune_model <- suppressWarnings(
 best_svm <- list(C = svm_tune_model$bestTune$C, sigma = svm_tune_model$bestTune$sigma)
 }
 
-# Helper to run the classifictaion tests
 run_one_iteration <- function(train_df, valid_df, seed) {
-  # train Logistic Regression
   set.seed(seed)
+  # train Logistic Regression
   lr_model <- glm(Cls ~ ., data = train_df, family = binomial)
   
-  # train Random Forest
+  # ---- Penalized Logistic Regression (Elastic Net) ----
+  # Prepare data
+  set.seed(seed)
+  x_train <- as.matrix(train_df[, setdiff(names(train_df), "Cls")])
+  y_train_fac <- as.factor(train_df$Cls)
+  n_classes <- length(levels(y_train_fac))
+  
+  if (n_classes < 2) stop("Less than 2 classes in training data")
+  
+  if (n_classes == 2) {
+    x_valid <- as.matrix(valid_df[, setdiff(names(valid_df), "Cls")])
+    y_valid_fac <- as.factor(valid_df$Cls)
+    
+    # Convert to numeric (0/1)
+    y_train_num <- as.numeric(y_train_fac) - 1
+    y_valid_num <- as.numeric(y_valid_fac) - 1
+    
+    # Fit elastic-net penalized logistic regression
+    plr_model <- glmnet::glmnet(
+      x = x_train,
+      y = y_train_num,
+      family = "binomial",
+      alpha = 0.5 # Elastic net mixing parameter
+    )
+    
+    # Select a lambda (you could use cv.glmnet for tuning)
+    lambda_use <- plr_model$lambda[length(plr_model$lambda)]
+    
+    # Predicted probabilities (for class "1")
+    plr_prob <- as.numeric(
+      predict(plr_model, newx = x_valid, s = lambda_use, type = "response")
+    )
+    
+    class_levels <- levels(y_train_fac)
+    plr_pred <- factor(
+      ifelse(plr_prob > 0.5, class_levels[2], class_levels[1]),
+      levels = class_levels
+    )
+    
+    # confusion matrix
+    cm_plr <- caret::confusionMatrix(
+      factor(valid_df$Cls, levels = class_levels), 
+      plr_pred, 
+      mode = "everything"
+    )
+    
+    byClass_plr <- flatten_byClass(cm_plr$byClass, class_levels)
+    overall_plr <- cm_plr$overall[c("Accuracy", "Kappa")]
+    plr_stats <- c(overall_plr, byClass_plr)
+  } else {
+    warning("pLR currently supports only binary classification.")
+    plr_stats <- NA
+  }
+  
+  # ---- Random Forest ----
   set.seed(seed)
   if (tune_RF && exists("best_rf")) {
-    rf_model <- randomForest::randomForest(Cls ~ ., data = train_df, mtry = best_rf$mtry, ntree = best_rf$ntree)
+    rf_model <- randomForest::randomForest(
+      Cls ~ ., data = train_df,
+      mtry = best_rf$mtry,
+      ntree = best_rf$ntree
+    )
   } else {
     rf_model <- randomForest::randomForest(Cls ~ ., data = train_df)
   }
   
-  # train KNN using caret (with preprocessing)
-  # Ensure levels are valid_df factor names
+  # ---- KNN ----
   set.seed(seed)
   train_knn <- train_df
   train_knn$Cls <- as.factor(train_knn$Cls)
-  levels(train_knn$Cls) <- c("Class0", "Class1") # adjust if classes differ
+  levels(train_knn$Cls) <- c("Class0", "Class1")
   
-  ctrl <- caret::trainControl(method = "cv", number = 5,
-                              classProbs = TRUE, summaryFunction = twoClassSummary)
+  ctrl <- caret::trainControl(
+    method = "cv", number = 5,
+    classProbs = TRUE, summaryFunction = twoClassSummary
+  )
   
   set.seed(seed)
   knn_model <- caret::train(
@@ -238,28 +296,26 @@ run_one_iteration <- function(train_df, valid_df, seed) {
     tuneLength = 5
   )
   
-  # train C5.0
+  # ---- C5.0 ----
   set.seed(seed)
   c50_model <- C50::C5.0(Cls ~ ., data = train_df)
   
-  # train SVM
+  # ---- SVM ----
   train_svm <- train_df
   train_svm$Cls <- as.factor(train_svm$Cls)
-  
   original_levels <- levels(train_svm$Cls)
   n_classes_svm <- length(original_levels)
-  
   new_levels <- paste0("Class", seq_len(n_classes_svm))
   levels(train_svm$Cls) <- new_levels
   
-  # Use method = "none" with pre-tuned C and sigma (no internal CV)
-  ctrl <- caret::trainControl(method = "none",
-                              classProbs = TRUE,
-                              allowParallel = FALSE)
+  ctrl <- caret::trainControl(
+    method = "none",
+    classProbs = TRUE,
+    allowParallel = FALSE
+  )
   
-  # Use tuned parameters if available, else defaults
-  C_value <- if(tune_SVM && exists("best_svm")) best_svm$C else 1
-  sigma_value <- if(tune_SVM && exists("best_svm")) best_svm$sigma else 0.1
+  C_value <- if (tune_SVM && exists("best_svm")) best_svm$C else 1
+  sigma_value <- if (tune_SVM && exists("best_svm")) best_svm$sigma else 0.1
   
   set.seed(seed)
   svm_model <- suppressWarnings(
@@ -272,8 +328,7 @@ run_one_iteration <- function(train_df, valid_df, seed) {
     )
   )
   
-  # Predict with all models on validation set (valid_df)
-  # For LR (binary probability)
+  # ---- Predictions ----
   lr_prob <- predict(lr_model, valid_df, type = "response")
   class_levels <- levels(FCPS_df_original$Target)
   
@@ -285,11 +340,9 @@ run_one_iteration <- function(train_df, valid_df, seed) {
   
   rf_pred <- predict(rf_model, valid_df)
   
-  # For KNN: rename valid_df$Cls factor to match KNN train_df levels
   valid_knn <- valid_df
   valid_knn$Cls <- as.factor(valid_knn$Cls)
   levels(valid_knn$Cls) <- c("Class0", "Class1")
-  
   knn_pred <- predict(knn_model, valid_knn)
   
   c50_pred <- predict(c50_model, valid_df)
@@ -297,36 +350,43 @@ run_one_iteration <- function(train_df, valid_df, seed) {
   valid_svm <- valid_df
   valid_svm$Cls <- as.factor(valid_svm$Cls)
   levels(valid_svm$Cls) <- c("Class1", "Class2")
-  
   svm_pred <- predict(svm_model, valid_df)
   
-  # Confusion matrices
-  cm_lr <- caret::confusionMatrix(factor(valid_df$Cls, levels = class_levels), lr_pred, mode = "everything")
+  # ---- Confusion Matrices ----
   cm_rf <- caret::confusionMatrix(factor(valid_df$Cls, levels = class_levels), rf_pred, mode = "everything")
+  cm_lr <- caret::confusionMatrix(factor(valid_df$Cls, levels = class_levels), lr_pred, mode = "everything")
   cm_knn <- caret::confusionMatrix(valid_knn$Cls, knn_pred, mode = "everything")
   cm_c50 <- caret::confusionMatrix(valid_df$Cls, c50_pred, mode = "everything")
   cm_svm <- caret::confusionMatrix(valid_svm$Cls, svm_pred, mode = "everything")
   
-  # Flatten 'byClass' stats helper function assumed present
-  byClass_lr <- flatten_byClass(cm_lr$byClass, class_levels)
+  # ---- Flatten stats ----
   byClass_rf <- flatten_byClass(cm_rf$byClass, class_levels)
+  byClass_lr <- flatten_byClass(cm_lr$byClass, class_levels)
   byClass_knn <- flatten_byClass(cm_knn$byClass, levels(valid_knn$Cls))
   byClass_c50 <- flatten_byClass(cm_c50$byClass, class_levels)
   byClass_svm <- flatten_byClass(cm_svm$byClass, levels(valid_svm$Cls))
   
-  overall_lr <- cm_lr$overall[c("Accuracy", "Kappa")]
   overall_rf <- cm_rf$overall[c("Accuracy", "Kappa")]
+  overall_lr <- cm_lr$overall[c("Accuracy", "Kappa")]
   overall_knn <- cm_knn$overall[c("Accuracy", "Kappa")]
   overall_c50 <- cm_c50$overall[c("Accuracy", "Kappa")]
   overall_svm <- cm_svm$overall[c("Accuracy", "Kappa")]
   
-  lr_stats <- c(overall_lr, byClass_lr)
   rf_stats <- c(overall_rf, byClass_rf)
+  lr_stats <- c(overall_lr, byClass_lr)
   knn_stats <- c(overall_knn, byClass_knn)
   c50_stats <- c(overall_c50, byClass_knn)
   svm_stats <- c(overall_svm, byClass_svm)
   
-  list(Logistic = lr_stats, RandomForest = rf_stats, KNN = knn_stats, C50 = c50_stats, SVM = svm_stats)
+  # ---- Return results ----
+  list(
+    Logistic = lr_stats,
+    PenalizedLogistic = plr_stats,
+    RandomForest = rf_stats,
+    KNN = knn_stats,
+    C50 = c50_stats,
+    SVM = svm_stats
+  )
 }
 
 # Main execution
@@ -368,8 +428,9 @@ extract_df <- function(results, model_name) {
   df
 }
 
-df_lr <- extract_df(results_list, "Logistic")
 df_rf <- extract_df(results_list, "RandomForest")
+df_lr <- extract_df(results_list, "Logistic")
+df_plr <- extract_df(results_list, "PenalizedLogistic")
 df_knn <- extract_df(results_list, "KNN")
 df_c50 <- extract_df(results_list, "C50")
 df_svm <- extract_df(results_list, "SVM")
@@ -384,8 +445,9 @@ summary_stats <- function(df) {
   )
 }
 
-summary_lr <- summary_stats(df_lr)
 summary_rf <- summary_stats(df_rf)
+summary_lr <- summary_stats(df_lr)
+summary_plr <- summary_stats(df_plr)
 summary_knn <- summary_stats(df_knn)
 summary_c50 <- summary_stats(df_c50)
 summary_svm <- summary_stats(df_svm)
@@ -402,6 +464,8 @@ for (i in 1:2) {
   print(summary_rf)
   cat("\n\nLR ML summary\n")
   print(summary_lr)
+  cat("\n\npLR ML summary\n")
+  print(summary_plr)
   cat("\n\nKNN ML summary\n")
   print(summary_knn)
   cat("\n\nC5.0 ML summary\n")
@@ -417,3 +481,95 @@ for (i in 1:2) {
 cat("\n", paste(rep("=", 80), collapse = ""), "\n")
 cat("FCPS analysis completed!\n")
 cat("\n", paste(rep("=", 80), collapse = ""), "\n")
+
+###############################################################################
+# PENALIZED LOGISTIC REGRESSION ANALYSIS 
+###############################################################################
+
+cat("\n", paste(rep("=", 80), collapse = ""), "\n")
+cat("PENALIZED LOGISTIC REGRESSION ANALYSIS\n")
+cat(paste(rep("=", 80), collapse = ""), "\n\n")
+
+# Run penalized analysis and capture to file
+sink(paste0(DATASET_NAME, "_penalized_lr_output.txt"))
+pen_res <- run_penalized_logistic_regression_all(
+  train_data = FCPS_df_original[,-1],
+  train_target = as.factor(FCPS_df_original$Target),
+  dataset_name = "Original unsplit - Penalized (ridge/lasso/elastic)",
+  alpha_elastic = 0.5,
+  nfolds = 5,
+  ridge_threshold = 0.05,
+  seed = 123
+)
+sink()
+
+# ========== EXPORT RESULTS TO CSV FOR PAPER ==========
+# Save the comparison table as CSV (perfect for paper tables)
+write.csv(pen_res$coef_table,
+          paste0(DATASET_NAME, "_penalized_comparison_table.csv"),
+          row.names = FALSE)
+
+cat("\n", paste(rep("=", 80), collapse = ""), "\n")
+cat("ANALYSIS COMPLETED! Files created:\n")
+cat(sprintf("  - %s_lr_orig_output.txt\n", DATASET_NAME))
+cat(sprintf("  - %s_penalized_lr_output.txt\n", DATASET_NAME))
+cat(sprintf("  - %s_penalized_comparison_table.csv\n", DATASET_NAME))
+cat(sprintf("  - %s_selection_summary.csv\n", DATASET_NAME))
+cat(paste(rep("=", 80), collapse = ""), "\n")
+
+
+###############################################################################
+# BORUTA ANALYSIS
+###############################################################################
+
+cat("\n", paste(rep("=", 80), collapse = ""), "\n")
+cat("BORUTA ANALYSIS\n")
+cat(paste(rep("=", 80), collapse = ""), "\n\n")
+
+# Run Boruta analysis and log output to a text file
+sink(paste0(DATASET_NAME, "_boruta_output.txt"))
+
+set.seed(123)  # For reproducibility
+boruta_res <- Boruta::Boruta(
+  x = FCPS_df_original[, -1], 
+  y = as.factor(FCPS_df_original$Target), 
+  doTrace = 1
+)
+
+sink()  # Stop capturing output
+
+# Get final variable importance decisions
+boruta_decisions <- boruta_res$finalDecision
+
+# Save summary to CSV
+boruta_summary <- data.frame(
+  Feature = names(boruta_decisions),
+  Decision = as.character(boruta_decisions),
+  stringsAsFactors = FALSE
+)
+
+write.csv(
+  boruta_summary,
+  paste0(DATASET_NAME, "_boruta_summary.csv"),
+  row.names = FALSE
+)
+
+# Save feature importance plot to file (optional, for paper figures)
+pdf(paste0(DATASET_NAME, "_boruta_plot.pdf"))
+plot(boruta_res, las = 2, cex.axis = 0.7, main = "Boruta Feature Importance")
+dev.off()
+
+# Print top features to console
+cat("\nTop Confirmed Features:\n")
+print(names(boruta_res$finalDecision[boruta_res$finalDecision == "Confirmed"]))
+
+cat("\n", paste(rep("=", 80), collapse = ""), "\n")
+cat("ANALYSIS COMPLETED! Files created:\n")
+cat(sprintf("  - %s_lr_orig_output.txt\n", DATASET_NAME))
+cat(sprintf("  - %s_penalized_lr_output.txt\n", DATASET_NAME))
+cat(sprintf("  - %s_penalized_comparison_table.csv\n", DATASET_NAME))
+cat(sprintf("  - %s_selection_summary.csv\n", DATASET_NAME))
+cat(sprintf("  - %s_boruta_output.txt\n", DATASET_NAME))
+cat(sprintf("  - %s_boruta_summary.csv\n", DATASET_NAME))
+cat(sprintf("  - %s_boruta_plot.pdf\n", DATASET_NAME))
+cat(paste(rep("=", 80), collapse = ""), "\n")
