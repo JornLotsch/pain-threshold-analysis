@@ -33,10 +33,6 @@ color_pal = ["#000000", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "
 # %% Paths
 pfad_o = "/home/joern/Aktuell/GenerativeESOM/"
 pfad_u1 = "08AnalyseProgramme/R/"
-pfad_u2 = "08AnalyseProgramme/Python/"
-pfad_u3 = "09Originale/"
-pfad_umx = "04Umatrix/"
-pfad_umx3 = "03Umatrix/"
 
 # %% Plot selteced FCPS data set in 3D
 
