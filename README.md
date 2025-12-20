@@ -1,18 +1,18 @@
 # Resolving interpretation challenges in machine learning feature selection with an iterative approach in biomedical pain data
 
-## Three-Phase Iterative Feature Selection and Classification Pipeline: 
+## Four-Phase Iterative Feature Selection and Classification Pipeline
 
-This project provides a comprehensive three-phase iterative machine learning framework that systematically identifies the truly minimal sufficient feature set for classification while ensuring no valuable features are overlooked through rescue mechanisms and explicit detection of feature selection method limitations.
+This project provides a comprehensive four-phase iterative machine learning framework that systematically identifies the truly minimal sufficient feature set for classification while ensuring no valuable features are overlooked through rescue mechanisms and explicit detection of feature selection method limitations.
 
 ## Overview
 
-This repository provides a rigorous framework for analyzing classification datasets through an iterative three-phase approach combining multiple feature selection methods and machine learning algorithms. Originally developed for pain threshold phenotype prediction using multimodal sensory data, the pipeline has been generalized for use with any tabular classification dataset.
+This repository provides a rigorous framework for analyzing classification datasets through an iterative four-phase approach combining multiple feature selection methods and machine learning algorithms. Originally developed for pain threshold phenotype prediction using multimodal sensory data, the pipeline has been generalized for use with any tabular classification dataset.
 
-The framework addresses a critical challenge in machine learning: feature selection methods may erroneously reject individually-strong features due to redundancy masking, interaction effects, or stochastic variability. Our three-phase approach systematically minimizes the feature set while implementing rescue mechanisms to recover falsely rejected features and explicitly flagging cases where feature selection methods fail to decompose complex interactions.
+The framework addresses a critical challenge in machine learning: feature selection methods may erroneously reject individually-strong features due to redundancy masking, interaction effects, or stochastic variability. Our four-phase approach systematically minimizes the feature set while implementing rescue mechanisms to recover falsely rejected features and explicitly flagging cases where feature selection methods fail to decompose complex interactions.
 
 ## Key Features
 
-- **Three-phase iterative approach**: Comprehensive feature selection (Phase 0), greedy backward elimination (Phase 1), and individual feature rescue with hierarchical verification (Phase 2-3)
+- **Four-phase iterative approach**: Initial comprehensive analysis (Phase 0), systematic minimization through backward elimination (Phase 1), individual rescue of rejected features (Phase 2), and hierarchical verification with iterative re-analysis (Phase 3)
 - **Multiple feature selection methods**: Boruta algorithm (nonlinear importance via Random Forest) and LASSO regularization (linear contributions with sparsity)
 - **Comprehensive classifier ensemble**: Random Forest, Logistic Regression, k-Nearest Neighbors, and C5.0 Decision Trees
 - **Rigorous statistical validation**: 100-run Monte Carlo cross-validation with 95% confidence intervals
@@ -24,53 +24,56 @@ The framework addresses a critical challenge in machine learning: feature select
 
 ## Algorithm Workflow
 
-![Image](FlowChart.drawio.svg)
-**Figure:** Flowchart of the four-phase feature selection framework. Blue elements represent decision points and final outputs. Gray boxes delineate Phases 0–3. The iterative loop in Phase 3 (right) continues until rejected features no longer enable classification.
+![Flowchart of the four-phase feature selection framework](FlowChart.drawio.svg)
 
+**Figure 1:** Flowchart of the four-phase feature selection framework. The pipeline systematically minimizes feature redundancy while preserving valuable features through four sequential phases: Phase 0 (initial analysis), Phase 1 (minimization), Phase 2 (individual rescue), and Phase 3 (verification with iterative rescue).
 
-### Phase 0: Comprehensive Initial Feature Selection
+### Overview of the Four-Phase Approach
 
-1. Apply Boruta algorithm and LASSO regularization to full **training** dataset
-2. Create multiple feature subset combinations:
-    - All features
-    - Boruta-selected features **("confirmed" only)**
-    - Boruta-rejected features
-    - LASSO-selected features **(non-zero coefficients at lambda.min)**
-    - LASSO-rejected features
-    - Union of Boruta and LASSO selections
-    - Intersection of Boruta and LASSO selections
-3. Test all combinations with five classifiers (RF, LR, KNN, C5.0, SVM) **tuned by grid search for hyperparameters**
-4. Identify smallest feature set achieving classification success (lower CI for balanced accuracy > 0.5)
-5. If no feature set succeeds, **including all features**, terminate with dataset unsuitability warning
-6. If **smallest successful subset is identical to full feature set**, terminate and return **"all features necessary"**; otherwise pass to Phase 1
+To identify the truly minimal sufficient feature set for classification, the analytical framework is organized into four phases that systematically minimize redundancy while ensuring no valuable features are overlooked. First, an initial analysis identifies candidate features and establishes baseline performance. Second, selected features are systematically removed and models are retrained to test whether classification can still be achieved. Third, features that failed to support classification are examined individually to confirm their lack of contribution. Together, these phases enable a structured evaluation of both selected and rejected features.
 
-### Phase 1: Greedy Backward Elimination
+### Phase 0: Initial Analysis
 
-1. Start with smallest successful feature set from Phase 0
-2. Iteratively test removal of each individual feature
-3. Permanently remove features whose absence maintains classification success
-4. Continue until no further features can be removed without classification failure
-5. Result: Minimal feature set necessary for classification
+In Phase 0, Boruta and LASSO are applied to the full training dataset. For **Boruta**, features are deemed relevant when they appear in the "confirmed" group. For **LASSO**, features are deemed relevant when their coefficient is larger than 0.
 
-### Phase 2: Individual Feature Rescue
+Multiple feature subset combinations are then tested with five classifiers (random forest, logistic regression, k-nearest neighbors, C5.0 decision tree, and support vector machines):
+- All features
+- Boruta-selected features
+- LASSO-selected features  
+- Boruta-rejected features
+- LASSO-rejected features
+- Unions and intersections of Boruta and LASSO selections
 
-1. Test each rejected feature individually for independent predictive ability
-2. Rescue any feature demonstrating classification success alone (lower CI > 0.5)
-3. Prevents loss of individually-strong features masked by redundancy or interactions
-4. Critical for scientific completeness: features with independent predictive power are valuable even if overshadowed during combined testing
+For each feature combination, classifiers are tuned by grid search for suitable hyperparameters (e.g., number of trees in random forests, number of neighbors in kNN). Classification success is defined as any classifier exhibiting a lower bound of the 95% confidence interval for balanced accuracy exceeding 0.5, based on 100 Monte-Carlo cross-validation iterations.
 
-### Phase 3: Hierarchical Verification and Iterative Rescue
+**Termination conditions:**
+- If no feature subset (including the full feature set) achieves classification success, the algorithm terminates and the dataset is deemed not classifiable
+- If the smallest successful subset is identical to the full feature set, all features are considered necessary and the procedure stops
+- Otherwise, the smallest successful subset is passed to Phase 1
 
-1. Verify final selected feature set achieves classification success
-2. Test if rejected feature set (as a group) can still classify
-3. **If rejected set succeeds**: Apply complete Phase 0 pipeline to rejected features:
-    - Run Boruta and LASSO on rejected feature set
-    - Test all subset combinations (Boruta-selected, LASSO-selected, unions, intersections)
-    - Individually verify features identified by either method
-    - Rescue features demonstrating independent classification success
-4. **If no features identified but set succeeds**: Issue critical warning about feature selection method limitations
-5. Iterate rescue mechanism until rejected set fails classification
-6. Flag cases where complex feature interactions cannot be decomposed by feature selection methods
+### Phase 1: Minimization of the Feature Set
+
+Starting from the smallest successful feature set identified in Phase 0, Phase 1 employs backward elimination to further minimize the feature set. Features are sequentially tested for removal, with each feature whose absence still maintains classification success being permanently removed. This iterative process continues until no further features can be removed without loss of classification success, yielding a minimal feature set capable of supporting successful classification.
+
+### Phase 2: Individual Rescue of Rejected Features
+
+Phase 2 implements a rescue mechanism to avoid incorrectly discarding potentially relevant variables. Each feature rejected during Phases 0 and 1 is tested individually to determine whether it can support classification on its own. Features demonstrating independent classification success (lower 95% CI for balanced accuracy > 0.5) are rescued and reintegrated into the selected feature set.
+
+This phase is essential because feature selection procedures can discard individually strong predictors due to redundancy masking, interaction effects, or stochastic variability. For example, a feature "A" may have independent classification ability but be rejected if features "B" and "C" together form a stronger combined predictor. Rescuing such features preserves scientifically valuable information and addresses the critical problem that features failing to pass feature selection can nonetheless classify successfully when used alone.
+
+### Phase 3: Verification and Analysis of the Rejected Set
+
+After Phases 0–2, the selected feature set should contain all features enabling successful classification while rejected features should not. Phase 3 verifies this assumption by jointly assessing both sets using the same logic as Phase 0.
+
+First, the selected feature set (including all rescued variables) is re-evaluated by running all feature selectors and classifiers on the complete group and across all subset combinations. Next, the rejected feature set is tested identically. If no classifier on no subset achieves performance above chance, the procedure terminates with the final partition.
+
+However, if at least one classifier on one subset achieves classification success, the full Phase 0 pipeline is rerun on the rejected subset:
+- Boruta and LASSO are reapplied to the rejected features
+- All resulting combinations are tested
+- Features selected by either method undergo individual testing; those showing independent success (lower CI > 0.5) are rescued and added to the selected set
+- Verification repeats iteratively until the rejected set no longer classifies successfully
+
+In rare cases where the rejected set retains group-level success but neither Boruta nor LASSO identifies features and no individual feature classifies alone, a warning is issued, flagging these features as potentially informative only through complex interactions undetectable by both methods.
 
 ## Classification Performance Criteria
 
@@ -232,7 +235,7 @@ Beyond the machine learning pipeline, the repository includes functions for trad
     - Highlights statistically significant differences
 
 These analyses are typically applied to:
-- Selected feature subsets from the three-phase pipeline
+- Selected feature subsets from the four-phase pipeline
 - Original complete dataset (with/without multicollinear variables)
 - Training and validation splits separately
 - Comparing modified vs. unmodified feature sets (e.g., with/without noise variables)
@@ -250,23 +253,30 @@ These analyses are typically applied to:
 
 ## Scientific Rationale
 
-The three-phase structure was deliberately chosen over alternative approaches:
+The four-phase iterative structure (Phases 0–3) was deliberately designed to address the challenge of identifying minimal sufficient feature sets while preserving scientifically valuable information:
 
-1. **Why not iterate Phases 0 and 1 repeatedly?**
-   - Computationally inefficient (repeated expensive Boruta/LASSO analyses)
-   - Provides diminishing returns (Phase 1 already exhaustively minimizes)
-   - Omits individual testing that prevents false rejection
+1. **Why separate Phase 0 (comprehensive testing) from Phases 1–3 (iterative refinement)?**
+   - Phase 0 exhaustively tests all feature combinations from two complementary methods (Boruta + LASSO), establishing a complete baseline of what can and cannot classify
+   - Phases 1–3 progressively minimize the feature set with systematic recovery mechanisms
+   - This separation ensures we don't prematurely eliminate features before understanding the full landscape of possibilities
 
-2. **Why include Phase 2 individual rescue?**
-   - Feature A with independent classification ability (CI > 0.5) might be rejected if features B and C together form stronger predictor
-   - A's individual importance is masked despite standalone predictive value
-   - Scientifically valuable to retain all individually-predictive features
+2. **Why include Phase 1 backward elimination?**
+   - Provides efficient systematic removal of redundant features while maintaining classification success
+   - Identifies the truly minimal subset from Phase 0's successful candidates
+   - Computationally more efficient than iterating Phase 0 repeatedly
 
-3. **Why hierarchical Phase 3 re-analysis?**
-   - Detects when rejected features succeed only through complex interactions
-   - Applies systematic feature selection to decompose responsible features
-   - Explicitly flags cases where both Boruta and LASSO fail
+3. **Why include Phase 2 individual rescue?**
+   - Addresses the core problem that feature selection procedures can reject individually strong predictors due to redundancy masking, interaction effects, or stochastic variability
+   - A feature "A" may have genuine independent classification ability but be rejected if features "B" and "C" together form a stronger combined predictor
+   - Preserves scientifically valuable features with independent predictive power that would otherwise be lost
+   - Directly targets the critical finding that features failing standard feature selection can nonetheless classify successfully when used alone
+
+4. **Why hierarchical Phase 3 re-analysis and iterative rescue?**
+   - Detects when rejected features succeed only through complex interactions undetectable by individual feature selection methods
+   - Systematically applies Phase 0 logic to rejected feature sets, identifying any additional rescuable features
+   - Explicitly flags cases where features are informative only through interactions both methods fail to decompose
    - Maintains scientific transparency about method limitations
+   - Iterates until rejected sets definitively fail, ensuring complete exploration of the feature space
 
 ## License
 
