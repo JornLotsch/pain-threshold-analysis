@@ -10,6 +10,28 @@ This repository provides a rigorous framework for analyzing classification datas
 
 The framework addresses a critical challenge in machine learning: feature selection methods may erroneously reject individually-strong features due to redundancy masking, interaction effects, or stochastic variability. Our four-phase approach systematically minimizes the feature set while implementing rescue mechanisms to recover falsely rejected features and explicitly flagging cases where feature selection methods fail to decompose complex interactions.
 
+## Table of Contents
+
+- [Key Features](#key-features)
+- [Algorithm Workflow](#algorithm-workflow)
+  - [Overview of the Four-Phase Approach](#overview-of-the-four-phase-approach)
+  - [Phase 0: Initial Analysis](#phase-0-initial-analysis)
+  - [Phase 1: Minimization of the Feature Set](#phase-1-minimization-of-the-feature-set)
+  - [Phase 2: Individual Rescue of Rejected Features](#phase-2-individual-rescue-of-rejected-features)
+  - [Phase 3: Verification and Analysis of the Rejected Set](#phase-3-verification-and-analysis-of-the-rejected-set)
+- [Classification Performance Criteria](#classification-performance-criteria)
+- [Installation & Requirements](#installation--requirements)
+- [Input Data Format](#input-data-format)
+- [Scripts](#scripts)
+- [Key Capabilities](#key-capabilities)
+- [Example Results Structure](#example-results-structure)
+- [Handling Edge Cases](#handling-edge-cases)
+- [Dependencies](#dependencies)
+- [Additional Information](#additional-information)
+- [Scientific Rationale](#scientific-rationale)
+- [License](#license)
+- [Citation](#citation)
+
 ## Key Features
 
 - **Four-phase iterative approach**: Initial comprehensive analysis (Phase 0), systematic minimization through backward elimination (Phase 1), individual rescue of rejected features (Phase 2), and hierarchical verification with iterative re-analysis (Phase 3)
@@ -192,6 +214,104 @@ The pipeline explicitly handles and reports:
 2. **Full feature set required**: Flags when feature selection fails to create successful subsets
 3. **Complex interactions undetected**: Warning when rejected features succeed as group but no individual features or subsets can be identified by Boruta/LASSO
 4. **Rescue mechanism iterations**: Continues until rejected set definitively fails or all rescuable features are recovered
+
+## Installation & Requirements
+
+### System Requirements
+
+- **R version**: 4.0 or higher (recommended 4.3+)
+- **Operating System**: Linux or Unix (macOS supported); **not tested on Windows**
+- **RAM**: Minimum 4GB (8GB+ recommended for large datasets)
+- **Processing**: Parallel processing recommended; CPU cores utilized: 4-8
+
+**Note**: This code has been developed and tested exclusively on Linux/Unix systems. Windows compatibility has not been verified; users on Windows systems may encounter issues with parallel processing or file path handling.
+
+### Package Installation
+
+Install required packages from CRAN:
+
+```r
+packages <- c(
+  "parallel",           # Base R: parallelization
+  "opdisDownsampling",  # Balanced dataset splitting
+  "randomForest",       # Random Forest implementation
+  "caret",              # Machine learning framework
+  "pbmcapply",          # Parallel processing with progress bars
+  "Boruta",             # Boruta feature selection
+  "reshape2",           # Data manipulation
+  "pROC",               # ROC/AUC analysis
+  "dplyr",              # Data wrangling
+  "glmnet",             # LASSO/Ridge/Elastic Net regression
+  "car",                # GLM diagnostics and VIF
+  "effsize",            # Effect size calculations
+  "ggplot2",            # Visualization
+  "tidyr",              # Data tidying
+  "C50"                 # C5.0 Decision Trees
+)
+
+# Install from CRAN
+install.packages(packages)
+
+# For SVM functionality (if needed)
+install.packages("kernlab")
+```
+
+### Special Package: opdisDownsampling
+
+**Status**: CRAN package  
+**Purpose**: Balanced dataset splitting and downsampling for cross-validation
+
+Installed automatically with the CRAN installation command above.
+
+### Verify Installation
+
+Test that all packages are loaded correctly:
+
+```r
+# Load all required packages
+library(parallel)
+library(opdisDownsampling)
+library(randomForest)
+library(caret)
+library(pbmcapply)
+library(Boruta)
+library(reshape2)
+library(pROC)
+library(dplyr)
+library(glmnet)
+library(car)
+library(effsize)
+library(ggplot2)
+library(tidyr)
+library(C50)
+
+cat("All packages loaded successfully!\n")
+```
+
+### Version Compatibility
+
+| Package | Tested Version | Minimum Version |
+|---------|---|---|
+| caret | 6.0+ | 6.0 |
+| randomForest | 4.6+ | 4.6 |
+| glmnet | 4.1+ | 4.0 |
+| Boruta | 7.0+ | 7.0 |
+| C50 | 0.1+ | 0.1 |
+| pROC | 1.18+ | 1.15 |
+
+## Input Data Format
+
+### Expected Structure
+
+- **Rows**: Individual samples/observations
+- **Columns**: Numeric or categorical features + a class/outcome variable
+- **Class variable**: Binary classification target (two distinct classes)
+- **Missing values**: Should be handled prior to analysis (listwise deletion, imputation, or feature-specific handling as appropriate)
+- **Class imbalance**: The pipeline uses balanced accuracy metrics which are robust to imbalance; extreme imbalance may require prior resampling
+
+### Preparation
+
+Users should prepare their data according to these requirements before adapting the analysis scripts. Implementation details for handling specific data characteristics (missing values, scaling, normalization) are provided in the core functions and example analysis scripts. See [Scripts](#scripts) section for example implementations on real datasets.
 
 ## Dependencies
 
