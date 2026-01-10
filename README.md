@@ -404,4 +404,4 @@ This project is licensed under the GNU General Public License v3.0 (GPL-3.0).
 
 ## Citation
 
-Lötsch, J, Himmelspach A, Kringel D. (2025). Resolving interpretation challenges in machine learning feature selection with an iterative approach in biomedical pain data. [European Journal of Pain 2025 (in revision)]
+Lötsch, J, Himmelspach A, Kringel D. (2025). Resolving interpretation challenges in machine learning feature selection with an iterative approach in biomedical pain data. [European Journal of Pain 2025 (accepted)]
